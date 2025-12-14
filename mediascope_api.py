@@ -15,13 +15,9 @@ import re
 from pathlib import Path
 import google.generativeai as genai
 
-# Import the pipeline
-try:
-    from mediascope_complete_pipeline import MediaScopePipeline, Config
-    PIPELINE_AVAILABLE = True
-except ImportError:
-    PIPELINE_AVAILABLE = False
-    print("⚠️ Warning: mediascope_complete_pipeline not available. OCR processing will be limited.")
+# Pipeline will be imported lazily to avoid dependency issues on startup
+PIPELINE_AVAILABLE = False
+pipeline = None
 
 # Load environment variables
 load_dotenv()
@@ -47,17 +43,27 @@ app.add_middleware(
 # Mount static files for newspaper images
 app.mount("/input_newspapers", StaticFiles(directory="input_newspapers"), name="newspapers")
 
-# Initialize OCR pipeline
-pipeline = None
-if PIPELINE_AVAILABLE:
+# Lazy initialization of OCR pipeline
+def _init_pipeline():
+    """Initialize pipeline on first use to avoid import errors on startup"""
+    global pipeline, PIPELINE_AVAILABLE
+
+    if pipeline is not None:
+        return pipeline
+
     try:
+        from mediascope_complete_pipeline import MediaScopePipeline, Config
         config = Config()
         pipeline = MediaScopePipeline(config)
         pipeline.initialize()
+        PIPELINE_AVAILABLE = True
         print("✅ MediaScope OCR Pipeline initialized")
+        return pipeline
     except Exception as e:
-        print(f"⚠️ Warning: Could not initialize pipeline: {e}")
-        pipeline = None
+        print(f"⚠️ Pipeline initialization failed: {e}")
+        print(f"   OCR features will be unavailable. Install missing dependencies with: pip install spacy transformers bertopic")
+        PIPELINE_AVAILABLE = False
+        return None
 
 def get_db():
     """Create database connection with environment variables"""
@@ -631,13 +637,15 @@ def trigger_ocr_processing(request: dict):
         if not file_path:
             raise HTTPException(404, f"File not found for file_id: {file_id}")
 
-    # Check if pipeline is available
-    if not pipeline:
-        raise HTTPException(503, "OCR pipeline not initialized. Please check server logs.")
+    # Initialize pipeline if needed (lazy loading)
+    active_pipeline = _init_pipeline()
+
+    if not active_pipeline:
+        raise HTTPException(503, "OCR pipeline not available. Missing dependencies (spaCy, transformers, etc.). Check server logs.")
 
     # Process the newspaper using the pipeline
     try:
-        success = pipeline.process_single_newspaper(file_path)
+        success = active_pipeline.process_single_newspaper(file_path)
 
         if success:
             return {
