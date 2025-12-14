@@ -188,7 +188,7 @@ const AISummaryPanel: React.FC = () => {
 
   return (
     <div className="ai-summary-panel">
-      <h2>🤖 AI-Powered Summary</h2>
+      <h2>AI-Powered Summary</h2>
 
       <div className="summary-controls">
         <div className="date-inputs">
@@ -205,8 +205,8 @@ const AISummaryPanel: React.FC = () => {
         <div className="topic-input">
           <label>
             Topic (optional):
-            <input 
-              type="text" 
+            <input
+              type="text"
               placeholder="e.g., politics"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
@@ -215,25 +215,25 @@ const AISummaryPanel: React.FC = () => {
         </div>
 
         <button onClick={generateSummary} disabled={loading} className="generate-button">
-          {loading ? '⏳ Generating...' : '✨ Generate Summary'}
+          {loading ? 'Generating...' : 'Generate Summary'}
         </button>
       </div>
 
       {summary && !summary.error && (
         <div className="summary-result">
           <div className="summary-meta">
-            <div><strong>📅 Period:</strong> {summary.date_range}</div>
-            <div><strong>📰 Articles:</strong> {summary.article_count}</div>
+            <div><strong>Period:</strong> {summary.date_range}</div>
+            <div><strong>Articles:</strong> {summary.article_count}</div>
           </div>
           <div className="summary-text">
-            <h3>📝 Summary:</h3>
+            <h3>Summary:</h3>
             <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8' }}>{summary.summary}</p>
           </div>
         </div>
       )}
 
       {summary && summary.error && (
-        <div className="summary-error">⚠️ {summary.error}</div>
+        <div className="summary-error">[ERROR] {summary.error}</div>
       )}
     </div>
   );
@@ -260,24 +260,15 @@ const TopEntitiesPanel: React.FC = () => {
     loadTopEntities();
   }, [entityType]);
 
-  const getEntityIcon = (type: string) => {
-    switch(type) {
-      case 'PERSON': return '👤';
-      case 'ORG': return '🏢';
-      case 'GPE': return '📍';
-      default: return '🏷️';
-    }
-  };
-
   return (
     <div className="top-entities-panel">
-      <h3>🏆 Top Entities</h3>
-      
+      <h3>Top Entities</h3>
+
       <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="entity-type-select">
         <option value="">All Types</option>
-        <option value="PERSON">👤 People</option>
-        <option value="ORG">🏢 Organizations</option>
-        <option value="GPE">📍 Locations</option>
+        <option value="PERSON">People</option>
+        <option value="ORG">Organizations</option>
+        <option value="GPE">Locations</option>
       </select>
 
       {loading ? (
@@ -289,7 +280,7 @@ const TopEntitiesPanel: React.FC = () => {
               <div className="entity-rank">#{idx + 1}</div>
               <div className="entity-info">
                 <div className="entity-name">
-                  {getEntityIcon(entity.type)} {entity.text}
+                  {entity.text}
                 </div>
                 <div className="entity-type-label">{entity.type}</div>
               </div>
@@ -304,68 +295,78 @@ const TopEntitiesPanel: React.FC = () => {
   );
 };
 
-const SentimentDistribution: React.FC = () => {
-  const [data, setData] = useState<any>(null);
+const EntityCooccurrence: React.FC = () => {
+  const [entityType, setEntityType] = useState<string>('');
+  const [cooccurrences, setCooccurrences] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  const loadCooccurrences = async () => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_BASE}/analytics/entity-cooccurrence`, {
+        params: {
+          entity_type: entityType || undefined,
+          min_count: 3,
+          limit: 30
+        }
+      });
+      setCooccurrences(response.data.pairs || []);
+    } catch (error) {
+      console.error('Error loading entity co-occurrences:', error);
+      setCooccurrences([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const result = await api.getSentimentOverview();
-        setData(result);
-      } catch (error) {
-        console.error('Error loading sentiment:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
-  }, []);
-
-  if (loading) return <p>Loading...</p>;
-  if (!data || data.total === 0) return <p>No data</p>;
-
-  const positivePercent = (data.positive / data.total) * 100;
-  const neutralPercent = (data.neutral / data.total) * 100;
-  const negativePercent = (data.negative / data.total) * 100;
+    loadCooccurrences();
+  }, [entityType]);
 
   return (
-    <div className="sentiment-distribution">
-      <h3>😊😐😞 Sentiment Analysis</h3>
-      
-      <div className="sentiment-stats">
-        <div className="stat-item positive">
-          <div className="stat-label">😊 Positive</div>
-          <div className="stat-value">{data.positive}</div>
-          <div className="stat-percent">{positivePercent.toFixed(1)}%</div>
-        </div>
-        <div className="stat-item neutral">
-          <div className="stat-label">😐 Neutral</div>
-          <div className="stat-value">{data.neutral}</div>
-          <div className="stat-percent">{neutralPercent.toFixed(1)}%</div>
-        </div>
-        <div className="stat-item negative">
-          <div className="stat-label">😞 Negative</div>
-          <div className="stat-value">{data.negative}</div>
-          <div className="stat-percent">{negativePercent.toFixed(1)}%</div>
-        </div>
-      </div>
+    <div className="entity-cooccurrence">
+      <h3>Entity Co-occurrence</h3>
+      <p className="subtitle">Entities that frequently appear together in articles</p>
 
-      <div className="sentiment-bar-container">
-        <div className="sentiment-bar positive" style={{ width: `${positivePercent}%` }}></div>
-        <div className="sentiment-bar neutral" style={{ width: `${neutralPercent}%` }}></div>
-        <div className="sentiment-bar negative" style={{ width: `${negativePercent}%` }}></div>
-      </div>
+      <select
+        value={entityType}
+        onChange={(e) => setEntityType(e.target.value)}
+        className="entity-type-select"
+      >
+        <option value="">All Types</option>
+        <option value="PERSON">People</option>
+        <option value="ORG">Organizations</option>
+        <option value="GPE">Locations</option>
+      </select>
 
-      <div className="total-articles">Total: {data.total}</div>
+      {loading ? (
+        <p>Loading...</p>
+      ) : cooccurrences.length > 0 ? (
+        <div className="cooccurrence-list">
+          {cooccurrences.map((pair, idx) => (
+            <div key={idx} className="cooccurrence-item">
+              <div className="cooccurrence-rank">#{idx + 1}</div>
+              <div className="cooccurrence-entities">
+                <span className="entity">{pair.entity1}</span>
+                <span className="connector">+</span>
+                <span className="entity">{pair.entity2}</span>
+              </div>
+              <div className="cooccurrence-count">
+                {pair.cooccurrence_count} {pair.cooccurrence_count === 1 ? 'article' : 'articles'}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p>No co-occurrences found</p>
+      )}
     </div>
   );
 };
 
 const MediaScopeDashboard: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'search' | 'trends' | 'analytics' | 'image-analysis' | 'ocr'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'analytics' | 'image-analysis' | 'ocr'>('search');
   const [searchFilters, setSearchFilters] = useState<any>(null);
 
   useEffect(() => {
@@ -387,7 +388,7 @@ const MediaScopeDashboard: React.FC = () => {
     <div className="mediascope-dashboard">
       <header className="dashboard-header">
         <div className="logo-section">
-          <h1>📰 MediaScope</h1>
+          <h1>MediaScope</h1>
           <p className="tagline">Dawn Newspaper Archive (1990-1992)</p>
         </div>
         <nav className="dashboard-nav">
@@ -395,31 +396,25 @@ const MediaScopeDashboard: React.FC = () => {
             className={activeTab === 'search' ? 'active' : ''}
             onClick={() => setActiveTab('search')}
           >
-            🔍 Search
-          </button>
-          <button
-            className={activeTab === 'trends' ? 'active' : ''}
-            onClick={() => setActiveTab('trends')}
-          >
-            📈 Trends
+            Search
           </button>
           <button
             className={activeTab === 'analytics' ? 'active' : ''}
             onClick={() => setActiveTab('analytics')}
           >
-            📊 Analytics
+            Analytics
           </button>
           <button
             className={activeTab === 'image-analysis' ? 'active' : ''}
             onClick={() => setActiveTab('image-analysis')}
           >
-            🖼️ Ad Analysis <span style={{fontSize: '0.7em', opacity: 0.8}}>(Beta)</span>
+            Ad Analysis <span style={{fontSize: '0.7em', opacity: 0.8}}>(Beta)</span>
           </button>
           <button
             className={activeTab === 'ocr' ? 'active' : ''}
             onClick={() => setActiveTab('ocr')}
           >
-            📰 OCR
+            OCR
           </button>
         </nav>
       </header>
@@ -443,14 +438,11 @@ const MediaScopeDashboard: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'trends' && (
-          <div className="trends-view">
-            <KeywordTrendChart />
-          </div>
-        )}
-
         {activeTab === 'analytics' && (
           <div className="analytics-view">
+            <div className="analytics-card full-width">
+              <KeywordTrendChart />
+            </div>
             <div className="analytics-grid">
               <div className="analytics-card">
                 <ArticlesOverTime />
@@ -461,17 +453,17 @@ const MediaScopeDashboard: React.FC = () => {
             </div>
             <div className="analytics-grid">
               <div className="analytics-card">
-                <SentimentDistribution />
+                <TopEntitiesPanel />
               </div>
               <div className="analytics-card">
-                <TopEntitiesPanel />
+                <TopKeywordsCloud />
               </div>
             </div>
             <div className="analytics-card full-width">
               <SentimentByEntityChart />
             </div>
-            <div className="analytics-card">
-              <TopKeywordsCloud />
+            <div className="analytics-card full-width">
+              <EntityCooccurrence />
             </div>
           </div>
         )}

@@ -812,6 +812,48 @@ def sentiment_by_entity(entity_type: Optional[str] = None, limit: int = 20):
     except psycopg2.Error as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
+@app.get("/api/analytics/entity-cooccurrence")
+def entity_cooccurrence(entity_type: Optional[str] = None, min_count: int = 3, limit: int = 50):
+    """Get entity pairs that frequently appear together in articles"""
+    limit = min(limit, 200)
+    try:
+        with get_db_cursor() as cur:
+            query = """
+                SELECT
+                    e1.entity_text as entity1,
+                    e1.entity_type as type1,
+                    e2.entity_text as entity2,
+                    e2.entity_type as type2,
+                    COUNT(DISTINCT e1.article_id) as cooccurrence_count
+                FROM entities e1
+                JOIN entities e2 ON e1.article_id = e2.article_id AND e1.entity_text < e2.entity_text
+            """
+
+            params = []
+            if entity_type:
+                query += " WHERE e1.entity_type = %s AND e2.entity_type = %s"
+                params = [entity_type, entity_type, min_count, limit]
+            else:
+                params = [min_count, limit]
+
+            query += """
+                GROUP BY e1.entity_text, e1.entity_type, e2.entity_text, e2.entity_type
+                HAVING COUNT(DISTINCT e1.article_id) >= %s
+                ORDER BY cooccurrence_count DESC
+                LIMIT %s
+            """
+
+            cur.execute(query, params)
+            results = cur.fetchall()
+
+            return {
+                "pairs": [dict(r) for r in results],
+                "entity_type": entity_type,
+                "min_count": min_count
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
 @app.get("/api/articles/{article_id}/related")
 def get_related_articles(article_id: str, limit: int = 10):
     """Get articles from the same newspaper"""
