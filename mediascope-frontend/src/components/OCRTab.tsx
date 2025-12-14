@@ -94,13 +94,42 @@ const OCRTab: React.FC = () => {
       });
 
       setBulkResults(response.data);
-      alert(`${response.data.message}`);
+      alert(`${response.data.message}\n\nStarting OCR processing for all files...`);
+
+      // Auto-process all uploaded files
+      setProcessing(true);
+      await handleBulkProcess(response.data.results);
+
     } catch (error: any) {
       console.error('Bulk upload error:', error);
       alert(error.response?.data?.detail || 'Failed to upload files');
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleBulkProcess = async (uploadedFiles: any[]) => {
+    let completed = 0;
+    let failed = 0;
+
+    for (const fileData of uploadedFiles) {
+      if (fileData.status === 'uploaded' && fileData.file_id) {
+        try {
+          await axios.post(`${API_BASE}/ocr/process`, {
+            file_id: fileData.file_id,
+            file_path: fileData.path,
+          });
+          completed++;
+          console.log(`✅ Processed: ${fileData.filename}`);
+        } catch (error) {
+          failed++;
+          console.error(`❌ Failed: ${fileData.filename}`, error);
+        }
+      }
+    }
+
+    setProcessing(false);
+    alert(`Batch processing complete!\n✅ Successful: ${completed}\n❌ Failed: ${failed}`);
   };
 
   const handleStartOCR = async () => {
@@ -181,19 +210,20 @@ const OCRTab: React.FC = () => {
               id="ocr-file-input"
               style={{ display: 'none' }}
               multiple={bulkMode}
+              {...(bulkMode ? { webkitdirectory: "", directory: "" } : {})}
             />
             <label htmlFor="ocr-file-input" className="upload-label">
               <div className="upload-icon">📄</div>
               <div className="upload-text">
                 {bulkMode
                   ? selectedFiles.length > 0
-                    ? `${selectedFiles.length} files selected`
-                    : 'Click to select newspaper images (multiple)'
+                    ? `${selectedFiles.length} files selected from folder`
+                    : '📁 Click to select a folder of newspaper images'
                   : selectedFile
                   ? selectedFile.name
                   : 'Click to select a newspaper image'}
               </div>
-              <div className="upload-hint">Supported: JPG, PNG, PDF</div>
+              <div className="upload-hint">{bulkMode ? 'Select a folder - all images will be processed automatically' : 'Supported: JPG, PNG, PDF'}</div>
             </label>
           </div>
 
