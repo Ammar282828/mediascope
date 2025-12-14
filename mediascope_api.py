@@ -618,8 +618,14 @@ def process_local_folder(request: dict):
     if not folder_path:
         raise HTTPException(400, "folder_path is required")
 
+    # Expand user path (~) and convert to absolute path
+    folder_path = os.path.expanduser(folder_path)
+    folder_path = os.path.abspath(folder_path)
+
+    print(f"[DEBUG] Attempting to access folder: {folder_path}")
+
     if not os.path.exists(folder_path):
-        raise HTTPException(404, f"Folder not found: {folder_path}")
+        raise HTTPException(404, f"Folder not found: {folder_path}. Please check the path and try again.")
 
     if not os.path.isdir(folder_path):
         raise HTTPException(400, f"Path is not a directory: {folder_path}")
@@ -649,8 +655,10 @@ def process_local_folder(request: dict):
 
     # Process each image
     results = []
-    for filename, file_path in image_files:
+    for idx, (filename, file_path) in enumerate(image_files, 1):
         try:
+            print(f"\n[{idx}/{len(image_files)}] Processing: {filename}")
+
             # Extract date from image
             extracted_date = extract_date_from_image(file_path)
 
@@ -664,7 +672,11 @@ def process_local_folder(request: dict):
                 "status": "completed" if success else "failed",
                 "message": "OCR processing completed successfully" if success else "OCR processing failed"
             })
+            print(f"[OK] {filename}: {'Success' if success else 'Failed'}")
         except Exception as e:
+            print(f"[ERROR] {filename}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             results.append({
                 "filename": filename,
                 "path": file_path,

@@ -29,6 +29,9 @@ const OCRTab: React.FC = () => {
   const [bulkResults, setBulkResults] = useState<any>(null);
   const [extractedDate, setExtractedDate] = useState<string | null>(null);
   const [filesNeedingDates, setFilesNeedingDates] = useState<any[]>([]);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [processProgress, setProcessProgress] = useState(0);
+  const [currentProcessingFile, setCurrentProcessingFile] = useState('');
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (bulkMode) {
@@ -52,6 +55,7 @@ const OCRTab: React.FC = () => {
 
     setUploading(true);
     setExtractedDate(null);
+    setUploadProgress(0);
     try {
       const formData = new FormData();
       formData.append('file', selectedFile);
@@ -60,9 +64,16 @@ const OCRTab: React.FC = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        onUploadProgress: (progressEvent) => {
+          const progress = progressEvent.total
+            ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            : 0;
+          setUploadProgress(progress);
+        },
       });
 
       setUploadedFile(response.data);
+      setUploadProgress(100);
 
       // Set extracted date if available
       if (response.data.extracted_date) {
@@ -76,6 +87,7 @@ const OCRTab: React.FC = () => {
       alert(error.response?.data?.detail || 'Failed to upload newspaper image');
     } finally {
       setUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
     }
   };
 
@@ -84,6 +96,7 @@ const OCRTab: React.FC = () => {
 
     setUploading(true);
     setBulkResults(null);
+    setUploadProgress(0);
     try {
       const formData = new FormData();
       selectedFiles.forEach(file => {
@@ -94,13 +107,21 @@ const OCRTab: React.FC = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        onUploadProgress: (progressEvent) => {
+          const progress = progressEvent.total
+            ? Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            : 0;
+          setUploadProgress(progress);
+        },
       });
 
+      setUploadProgress(100);
       setBulkResults(response.data);
       alert(`${response.data.message}\n\nStarting OCR processing for all files...`);
 
       // Auto-process all uploaded files
       setProcessing(true);
+      setProcessProgress(0);
       await handleBulkProcess(response.data.results);
 
     } catch (error: any) {
@@ -108,6 +129,7 @@ const OCRTab: React.FC = () => {
       alert(error.response?.data?.detail || 'Failed to upload files');
     } finally {
       setUploading(false);
+      setTimeout(() => setUploadProgress(0), 1000);
     }
   };
 
@@ -115,10 +137,12 @@ const OCRTab: React.FC = () => {
     let completed = 0;
     let failed = 0;
     const missingDates: any[] = [];
+    const totalFiles = uploadedFiles.filter(f => f.status === 'uploaded' && f.file_id).length;
 
     for (const fileData of uploadedFiles) {
       if (fileData.status === 'uploaded' && fileData.file_id) {
         try {
+          setCurrentProcessingFile(fileData.filename);
           // Process even without date - backend will use default or skip date validation
           await axios.post(`${API_BASE}/ocr/process`, {
             file_id: fileData.file_id,
@@ -126,6 +150,7 @@ const OCRTab: React.FC = () => {
             publication_date: fileData.extracted_date || null,
           });
           completed++;
+          setProcessProgress(Math.round((completed / totalFiles) * 100));
           console.log(`Processed: ${fileData.filename}`);
 
           // Track files without extracted dates
@@ -137,13 +162,16 @@ const OCRTab: React.FC = () => {
           }
         } catch (error) {
           failed++;
+          setProcessProgress(Math.round(((completed + failed) / totalFiles) * 100));
           console.error(`Failed: ${fileData.filename}`, error);
         }
       }
     }
 
     setProcessing(false);
+    setCurrentProcessingFile('');
     setFilesNeedingDates(missingDates);
+    setTimeout(() => setProcessProgress(0), 1000);
 
     let message = `Batch processing complete!\nSuccessful: ${completed}\nFailed: ${failed}`;
     if (missingDates.length > 0) {
@@ -156,6 +184,8 @@ const OCRTab: React.FC = () => {
     if (!uploadedFile) return;
 
     setProcessing(true);
+    setProcessProgress(0);
+    setCurrentProcessingFile(uploadedFile.filename || 'Processing...');
     try {
       const response = await axios.post(`${API_BASE}/ocr/process`, {
         file_id: uploadedFile.file_id,
@@ -163,30 +193,18 @@ const OCRTab: React.FC = () => {
       });
 
       setOcrStatus(response.data);
+      setProcessProgress(100);
+      setProcessing(false);
+      setCurrentProcessingFile('');
+      setTimeout(() => setProcessProgress(0), 1000);
 
-      // Start polling for status
-      const intervalId = setInterval(async () => {
-        try {
-          const statusResponse = await axios.get(
-            `${API_BASE}/ocr/status/${uploadedFile.file_id}`
-          );
-          setOcrStatus(statusResponse.data);
-
-          if (statusResponse.data.status === 'completed' || statusResponse.data.status === 'failed') {
-            clearInterval(intervalId);
-            setProcessing(false);
-          }
-        } catch (error) {
-          console.error('Status check error:', error);
-        }
-      }, 3000);
-
-      // Clean up interval after 10 minutes
-      setTimeout(() => clearInterval(intervalId), 600000);
+      // Note: The actual status polling has been simplified since processing happens synchronously
     } catch (error) {
       console.error('OCR processing error:', error);
       alert('Failed to start OCR processing');
       setProcessing(false);
+      setCurrentProcessingFile('');
+      setProcessProgress(0);
     }
   };
 
@@ -198,18 +216,25 @@ const OCRTab: React.FC = () => {
 
     setProcessing(true);
     setBulkResults(null);
+    setProcessProgress(0);
+    setCurrentProcessingFile('Scanning folder...');
     try {
       const response = await axios.post(`${API_BASE}/ocr/process-folder`, {
         folder_path: folderPath,
       });
 
       setBulkResults(response.data);
+      setProcessProgress(100);
       setProcessing(false);
+      setCurrentProcessingFile('');
+      setTimeout(() => setProcessProgress(0), 1000);
       alert(response.data.message);
     } catch (error: any) {
       console.error('Local folder processing error:', error);
       alert(error.response?.data?.detail || 'Failed to process local folder');
       setProcessing(false);
+      setCurrentProcessingFile('');
+      setProcessProgress(0);
     }
   };
 
@@ -371,6 +396,38 @@ const OCRTab: React.FC = () => {
                     : `Upload ${selectedFiles.length} Images`}
                 </button>
               )}
+            </div>
+          )}
+
+          {/* Upload Progress Bar */}
+          {uploading && uploadProgress > 0 && (
+            <div className="progress-container">
+              <div className="progress-header">
+                <span>Uploading...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Processing Progress Bar */}
+          {processing && (
+            <div className="progress-container">
+              <div className="progress-header">
+                <span>{currentProcessingFile || 'Processing...'}</span>
+                <span>{processProgress}%</span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill processing"
+                  style={{ width: `${processProgress || 10}%` }}
+                />
+              </div>
             </div>
           )}
         </div>
