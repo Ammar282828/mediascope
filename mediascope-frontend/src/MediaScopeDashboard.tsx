@@ -10,6 +10,7 @@ import { ArticlesOverTime, SentimentOverTime, TopKeywordsCloud } from './compone
 import ImageAnalysisTab from './components/ImageAnalysisTab';
 import OCRTab from './components/OCRTab';
 import SentimentByEntityChart from './components/SentimentByEntityChart';
+import NewspaperBrowser from './components/NewspaperBrowser';
 import { API_BASE } from './config';
 
 interface TrendData {
@@ -112,7 +113,7 @@ const KeywordTrendChart: React.FC = () => {
 
   return (
     <div className="trend-chart-panel">
-      <h2>📈 Keyword Trends Over Time</h2>
+      <h2>Keyword Trends Over Time</h2>
       
       <div className="keyword-input-group">
         <input
@@ -366,7 +367,7 @@ const EntityCooccurrence: React.FC = () => {
 
 const MediaScopeDashboard: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'search' | 'analytics' | 'image-analysis' | 'ocr'>('search');
+  const [activeTab, setActiveTab] = useState<'search' | 'analytics' | 'pages' | 'image-analysis' | 'ocr'>('search');
   const [searchFilters, setSearchFilters] = useState<any>(null);
 
   useEffect(() => {
@@ -403,6 +404,12 @@ const MediaScopeDashboard: React.FC = () => {
             onClick={() => setActiveTab('analytics')}
           >
             Analytics
+          </button>
+          <button
+            className={activeTab === 'pages' ? 'active' : ''}
+            onClick={() => setActiveTab('pages')}
+          >
+            Pages
           </button>
           <button
             className={activeTab === 'image-analysis' ? 'active' : ''}
@@ -467,6 +474,8 @@ const MediaScopeDashboard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {activeTab === 'pages' && <NewspaperBrowser />}
 
         {activeTab === 'image-analysis' && <ImageAnalysisTab />}
 

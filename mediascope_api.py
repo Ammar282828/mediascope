@@ -854,6 +854,181 @@ def entity_cooccurrence(entity_type: Optional[str] = None, min_count: int = 3, l
     except psycopg2.Error as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
+@app.get("/api/newspapers")
+def search_newspapers(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    page_number: Optional[int] = None,
+    limit: int = 50
+):
+    """Search newspapers by date and page number"""
+    limit = min(limit, 200)
+    try:
+        with get_db_cursor() as cur:
+            query = """
+                SELECT
+                    n.id,
+                    n.publication_date,
+                    n.page_number,
+                    n.section,
+                    n.image_path,
+                    COUNT(a.id) as article_count,
+                    AVG(a.sentiment_score) as avg_sentiment
+                FROM newspapers n
+                LEFT JOIN articles a ON n.id = a.newspaper_id
+                WHERE 1=1
+            """
+            params = []
+
+            if start_date:
+                query += " AND n.publication_date >= %s"
+                params.append(start_date)
+            if end_date:
+                query += " AND n.publication_date <= %s"
+                params.append(end_date)
+            if page_number is not None:
+                query += " AND n.page_number = %s"
+                params.append(page_number)
+
+            query += """
+                GROUP BY n.id, n.publication_date, n.page_number, n.section, n.image_path
+                ORDER BY n.publication_date DESC, n.page_number ASC
+                LIMIT %s
+            """
+            params.append(limit)
+
+            cur.execute(query, params)
+            newspapers = cur.fetchall()
+
+            return {
+                "newspapers": [dict(n) for n in newspapers],
+                "count": len(newspapers)
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/newspapers/{newspaper_id}")
+def get_newspaper_page(newspaper_id: str):
+    """Get newspaper page with all its articles"""
+    try:
+        with get_db_cursor() as cur:
+            # Get newspaper info
+            cur.execute("""
+                SELECT id, publication_date, page_number, section, image_path
+                FROM newspapers
+                WHERE id = %s
+            """, (newspaper_id,))
+
+            newspaper = cur.fetchone()
+            if not newspaper:
+                raise HTTPException(404, "Newspaper page not found")
+
+            # Get all articles from this page
+            cur.execute("""
+                SELECT
+                    a.id,
+                    a.article_number,
+                    a.headline,
+                    a.content,
+                    a.word_count,
+                    a.sentiment_score,
+                    a.sentiment_label,
+                    a.topic_label
+                FROM articles a
+                WHERE a.newspaper_id = %s
+                ORDER BY a.article_number
+            """, (newspaper_id,))
+
+            articles = cur.fetchall()
+
+            # Get entities for all articles
+            cur.execute("""
+                SELECT
+                    e.article_id,
+                    e.entity_text,
+                    e.entity_type
+                FROM entities e
+                WHERE e.article_id IN (
+                    SELECT id FROM articles WHERE newspaper_id = %s
+                )
+            """, (newspaper_id,))
+
+            entities = cur.fetchall()
+
+            return {
+                "newspaper": dict(newspaper),
+                "articles": [dict(a) for a in articles],
+                "entities": [dict(e) for e in entities],
+                "article_count": len(articles)
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/newspapers/{newspaper_id}/summarize")
+def summarize_newspaper_page(newspaper_id: str):
+    """Generate AI summary for an entire newspaper page"""
+    try:
+        with get_db_cursor() as cur:
+            # Get newspaper info
+            cur.execute("""
+                SELECT publication_date, page_number, section
+                FROM newspapers
+                WHERE id = %s
+            """, (newspaper_id,))
+
+            newspaper = cur.fetchone()
+            if not newspaper:
+                raise HTTPException(404, "Newspaper page not found")
+
+            # Get all articles from this page
+            cur.execute("""
+                SELECT headline, content
+                FROM articles
+                WHERE newspaper_id = %s
+                ORDER BY article_number
+            """, (newspaper_id,))
+
+            articles = cur.fetchall()
+
+            if not articles:
+                return {
+                    "error": "No articles found for this newspaper page"
+                }
+
+            # Prepare content for summarization
+            page_content = f"Newspaper: Dawn, Date: {newspaper['publication_date']}, Page: {newspaper['page_number']}\n\n"
+            for article in articles:
+                page_content += f"Headline: {article['headline']}\n{article['content'][:500]}\n\n"
+
+            # Generate summary using Gemini
+            gemini_api_key = os.getenv("GEMINI_API_KEY")
+            if not gemini_api_key:
+                raise HTTPException(500, "GEMINI_API_KEY not configured")
+
+            genai.configure(api_key=gemini_api_key)
+            model = genai.GenerativeModel('gemini-pro')
+
+            prompt = f"""Provide a comprehensive summary of this newspaper page from {newspaper['publication_date']}.
+Include the main topics covered, key events, and important details mentioned across all articles.
+
+{page_content[:5000]}
+
+Summary:"""
+
+            response = model.generate_content(prompt)
+
+            return {
+                "newspaper_id": newspaper_id,
+                "publication_date": str(newspaper['publication_date']),
+                "page_number": newspaper['page_number'],
+                "article_count": len(articles),
+                "summary": response.text
+            }
+
+    except Exception as e:
+        print(f"Error generating summary: {e}")
+        return {"error": f"Failed to generate summary: {str(e)}"}
+
 @app.get("/api/articles/{article_id}/related")
 def get_related_articles(article_id: str, limit: int = 10):
     """Get articles from the same newspaper"""
