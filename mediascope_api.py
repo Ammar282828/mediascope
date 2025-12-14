@@ -544,22 +544,28 @@ def process_local_folder(request: dict):
     if not active_pipeline:
         raise HTTPException(503, "OCR pipeline not available. Missing dependencies (spaCy, transformers, etc.). Check server logs.")
 
-    # Scan folder for image files
+    # Scan folder for image files (recursively search subdirectories)
     image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.HEIC', '.JPG', '.JPEG', '.PNG'}
     image_files = []
 
     try:
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path):
+        # Walk through all subdirectories
+        for root, dirs, files in os.walk(folder_path):
+            for filename in files:
                 _, ext = os.path.splitext(filename)
                 if ext in image_extensions:
-                    image_files.append((filename, file_path))
+                    file_path = os.path.join(root, filename)
+                    # Use relative path for cleaner display
+                    relative_path = os.path.relpath(file_path, folder_path)
+                    image_files.append((relative_path, file_path))
+
+        # Sort by path for consistent ordering
+        image_files.sort(key=lambda x: x[0])
     except Exception as e:
         raise HTTPException(500, f"Error reading folder: {str(e)}")
 
     if not image_files:
-        raise HTTPException(400, f"No image files found in folder: {folder_path}")
+        raise HTTPException(400, f"No image files found in folder (searched recursively): {folder_path}")
 
     # Process each image
     results = []
