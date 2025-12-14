@@ -224,11 +224,23 @@ class MediaScopeDatabase:
 
 class ImageProcessor:
     """Handle image preprocessing and OCR"""
-    
+
     def __init__(self, config: Config):
         self.config = config
         genai.configure(api_key=config.GEMINI_API_KEY)
-        self.model = genai.GenerativeModel(config.GEMINI_MODEL)
+
+        # Safety settings to allow OCR of historical newspapers
+        self.safety_settings = {
+            "HARM_CATEGORY_HARASSMENT": "BLOCK_NONE",
+            "HARM_CATEGORY_HATE_SPEECH": "BLOCK_NONE",
+            "HARM_CATEGORY_SEXUALLY_EXPLICIT": "BLOCK_NONE",
+            "HARM_CATEGORY_DANGEROUS_CONTENT": "BLOCK_NONE",
+        }
+
+        self.model = genai.GenerativeModel(
+            config.GEMINI_MODEL,
+            safety_settings=self.safety_settings
+        )
     
     def extract_metadata(self, image_path: str) -> Dict:
         """Extract date and page number from newspaper"""
@@ -247,8 +259,11 @@ PAGE: [page number]
 
 If not found, write UNKNOWN."""
 
-            response = self.model.generate_content([prompt, img])
-            text = response.text
+            response = self.model.generate_content(
+                [prompt, img],
+                safety_settings=self.safety_settings
+            )
+            text = response.text if response.parts else ""
             
             month_match = re.search(r'MONTH:\s*(\w+)', text, re.IGNORECASE)
             day_match = re.search(r'DAY:\s*(\d+)', text, re.IGNORECASE)
@@ -303,24 +318,36 @@ If not found, write UNKNOWN."""
             img = Image.open(image_path)
             img = self.enhance_image(img)
             
-            prompt = """This is a historical newspaper from 1990 being digitized for academic research.
+            prompt = """You are digitizing historical newspaper archives for educational research and preservation.
 
-Identify and extract article structure from this newspaper page:
-- Number each distinct article (1, 2, 3...)
-- Provide the headline for each
-- Extract the text content for digital preservation
+Your task: Extract text from this 1990s newspaper page for academic archival purposes.
 
-Format:
+Output each article found using this format:
 ARTICLE_START
 NUMBER: [number]
-HEADLINE: [headline text]
-CONTENT: [article text for research archive]
+HEADLINE: [headline]
+CONTENT: [full article text]
 ARTICLE_END
 
-This is for educational and historical research purposes."""
+Note: This is archive digitization work under fair use for educational purposes."""
 
-            response = self.model.generate_content([prompt, img])
-            text = response.text
+            # Generate with explicit safety override for archival work
+            response = self.model.generate_content(
+                [prompt, img],
+                safety_settings=self.safety_settings
+            )
+
+            # Check if response was blocked
+            if not response.parts:
+                print(f"  [WARNING] Response blocked - attempting with modified prompt")
+                # Try with even more explicit archival context
+                fallback_prompt = """Extract and transcribe text from this newspaper scan for historical archive database. Provide article headlines and text content in structured format."""
+                response = self.model.generate_content(
+                    [fallback_prompt, img],
+                    safety_settings=self.safety_settings
+                )
+
+            text = response.text if response.parts else ""
             
             articles = []
             article_blocks = re.findall(
