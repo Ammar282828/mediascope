@@ -610,6 +610,80 @@ async def upload_bulk_newspapers(files: List[UploadFile] = File(...)):
     except Exception as e:
         raise HTTPException(500, f"Bulk upload error: {str(e)}")
 
+@app.post("/api/ocr/process-folder")
+def process_local_folder(request: dict):
+    """Process all newspaper images from a local folder without uploading"""
+    folder_path = request.get('folder_path')
+
+    if not folder_path:
+        raise HTTPException(400, "folder_path is required")
+
+    if not os.path.exists(folder_path):
+        raise HTTPException(404, f"Folder not found: {folder_path}")
+
+    if not os.path.isdir(folder_path):
+        raise HTTPException(400, f"Path is not a directory: {folder_path}")
+
+    # Initialize pipeline if needed (lazy loading)
+    active_pipeline = _init_pipeline()
+
+    if not active_pipeline:
+        raise HTTPException(503, "OCR pipeline not available. Missing dependencies (spaCy, transformers, etc.). Check server logs.")
+
+    # Scan folder for image files
+    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.HEIC', '.JPG', '.JPEG', '.PNG'}
+    image_files = []
+
+    try:
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            if os.path.isfile(file_path):
+                _, ext = os.path.splitext(filename)
+                if ext in image_extensions:
+                    image_files.append((filename, file_path))
+    except Exception as e:
+        raise HTTPException(500, f"Error reading folder: {str(e)}")
+
+    if not image_files:
+        raise HTTPException(400, f"No image files found in folder: {folder_path}")
+
+    # Process each image
+    results = []
+    for filename, file_path in image_files:
+        try:
+            # Extract date from image
+            extracted_date = extract_date_from_image(file_path)
+
+            # Process the newspaper using the pipeline
+            success = active_pipeline.process_single_newspaper(file_path)
+
+            results.append({
+                "filename": filename,
+                "path": file_path,
+                "extracted_date": extracted_date,
+                "status": "completed" if success else "failed",
+                "message": "OCR processing completed successfully" if success else "OCR processing failed"
+            })
+        except Exception as e:
+            results.append({
+                "filename": filename,
+                "path": file_path,
+                "status": "error",
+                "message": str(e)
+            })
+
+    # Count successes
+    successful = sum(1 for r in results if r.get("status") == "completed")
+
+    return {
+        "folder_path": folder_path,
+        "total_files": len(image_files),
+        "successful": successful,
+        "failed": len(image_files) - successful,
+        "results": results,
+        "message": f"Processed {successful} of {len(image_files)} files successfully"
+    }
+
 @app.post("/api/ocr/process")
 def trigger_ocr_processing(request: dict):
     """Trigger OCR processing for uploaded newspaper using MediaScope pipeline"""

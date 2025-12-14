@@ -24,6 +24,8 @@ const OCRTab: React.FC = () => {
   const [ocrStatus, setOcrStatus] = useState<OCRJob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [bulkMode, setBulkMode] = useState(false);
+  const [localFolderMode, setLocalFolderMode] = useState(false);
+  const [folderPath, setFolderPath] = useState('');
   const [bulkResults, setBulkResults] = useState<any>(null);
   const [extractedDate, setExtractedDate] = useState<string | null>(null);
   const [filesNeedingDates, setFilesNeedingDates] = useState<any[]>([]);
@@ -188,6 +190,29 @@ const OCRTab: React.FC = () => {
     }
   };
 
+  const handleProcessLocalFolder = async () => {
+    if (!folderPath.trim()) {
+      alert('Please enter a folder path');
+      return;
+    }
+
+    setProcessing(true);
+    setBulkResults(null);
+    try {
+      const response = await axios.post(`${API_BASE}/ocr/process-folder`, {
+        folder_path: folderPath,
+      });
+
+      setBulkResults(response.data);
+      setProcessing(false);
+      alert(response.data.message);
+    } catch (error: any) {
+      console.error('Local folder processing error:', error);
+      alert(error.response?.data?.detail || 'Failed to process local folder');
+      setProcessing(false);
+    }
+  };
+
   return (
     <div className="ocr-view">
       <div className="ocr-header">
@@ -197,9 +222,10 @@ const OCRTab: React.FC = () => {
 
       <div className="mode-toggle">
         <button
-          className={!bulkMode ? 'active' : ''}
+          className={!bulkMode && !localFolderMode ? 'active' : ''}
           onClick={() => {
             setBulkMode(false);
+            setLocalFolderMode(false);
             setSelectedFiles([]);
             setBulkResults(null);
           }}
@@ -207,42 +233,83 @@ const OCRTab: React.FC = () => {
           Single Upload
         </button>
         <button
-          className={bulkMode ? 'active' : ''}
+          className={bulkMode && !localFolderMode ? 'active' : ''}
           onClick={() => {
             setBulkMode(true);
+            setLocalFolderMode(false);
             setSelectedFile(null);
             setPreviewUrl(null);
           }}
         >
           Bulk Upload
         </button>
+        <button
+          className={localFolderMode ? 'active' : ''}
+          onClick={() => {
+            setBulkMode(false);
+            setLocalFolderMode(true);
+            setSelectedFile(null);
+            setSelectedFiles([]);
+            setPreviewUrl(null);
+            setBulkResults(null);
+          }}
+        >
+          Local Folder
+        </button>
       </div>
 
       <div className="ocr-panel">
         <div className="upload-section">
-          <div className="file-upload-area">
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileSelect}
-              id="ocr-file-input"
-              style={{ display: 'none' }}
-              multiple={bulkMode}
-              {...(bulkMode ? { webkitdirectory: "", directory: "" } : {})}
-            />
-            <label htmlFor="ocr-file-input" className="upload-label">
-              <div className="upload-text">
-                {bulkMode
-                  ? selectedFiles.length > 0
-                    ? `${selectedFiles.length} files selected from folder`
-                    : 'Click to select a folder of newspaper images'
-                  : selectedFile
-                  ? selectedFile.name
-                  : 'Click to select a newspaper image'}
+          {localFolderMode ? (
+            <div className="folder-path-input">
+              <div className="input-group">
+                <label htmlFor="folder-path">Enter Local Folder Path:</label>
+                <input
+                  type="text"
+                  id="folder-path"
+                  value={folderPath}
+                  onChange={(e) => setFolderPath(e.target.value)}
+                  placeholder="/path/to/your/newspaper/images"
+                  className="folder-path-field"
+                />
               </div>
-              <div className="upload-hint">{bulkMode ? 'Select a folder - all images will be processed automatically' : 'Supported: JPG, PNG, PDF'}</div>
-            </label>
-          </div>
+              <div className="folder-hint">
+                Enter the full path to a folder containing newspaper images (JPG, PNG, HEIC).
+                All images will be processed directly without uploading.
+              </div>
+              <button
+                onClick={handleProcessLocalFolder}
+                disabled={processing || !folderPath.trim()}
+                className="process-btn"
+              >
+                {processing ? 'Processing...' : 'Process Folder'}
+              </button>
+            </div>
+          ) : (
+            <div className="file-upload-area">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                id="ocr-file-input"
+                style={{ display: 'none' }}
+                multiple={bulkMode}
+                {...(bulkMode ? { webkitdirectory: "", directory: "" } : {})}
+              />
+              <label htmlFor="ocr-file-input" className="upload-label">
+                <div className="upload-text">
+                  {bulkMode
+                    ? selectedFiles.length > 0
+                      ? `${selectedFiles.length} files selected from folder`
+                      : 'Click to select a folder of newspaper images'
+                    : selectedFile
+                    ? selectedFile.name
+                    : 'Click to select a newspaper image'}
+                </div>
+                <div className="upload-hint">{bulkMode ? 'Select a folder - all images will be processed automatically' : 'Supported: JPG, PNG, PDF'}</div>
+              </label>
+            </div>
+          )}
 
           {uploadedFile && !bulkMode && (
             <div className="ocr-metadata">
@@ -271,7 +338,7 @@ const OCRTab: React.FC = () => {
             </div>
           )}
 
-          {(selectedFile || selectedFiles.length > 0) && (
+          {!localFolderMode && (selectedFile || selectedFiles.length > 0) && (
             <div className="upload-actions">
               {!bulkMode ? (
                 <>
@@ -358,7 +425,7 @@ const OCRTab: React.FC = () => {
 
       {bulkResults && (
         <div className="bulk-results">
-          <h3>Bulk Upload Results</h3>
+          <h3>{localFolderMode ? 'Local Folder Processing Results' : 'Bulk Upload Results'}</h3>
           <div className="bulk-summary">
             <div className="summary-stat success">
               <div className="stat-label">Successful</div>
@@ -381,7 +448,8 @@ const OCRTab: React.FC = () => {
                   <th>Filename</th>
                   <th>Status</th>
                   <th>Detected Date</th>
-                  <th>Size</th>
+                  {!localFolderMode && <th>Size</th>}
+                  {localFolderMode && <th>Path</th>}
                 </tr>
               </thead>
               <tbody>
@@ -390,11 +458,14 @@ const OCRTab: React.FC = () => {
                     <td>{result.filename}</td>
                     <td>
                       <span className={`status-badge ${result.status}`}>
-                        {result.status === 'uploaded' ? 'Uploaded' : 'Error'}
+                        {localFolderMode
+                          ? result.status === 'completed' ? 'Completed' : result.status === 'failed' ? 'Failed' : 'Error'
+                          : result.status === 'uploaded' ? 'Uploaded' : 'Error'}
                       </span>
                     </td>
                     <td>{result.extracted_date || 'Not detected'}</td>
-                    <td>{result.size ? `${(result.size / 1024).toFixed(1)} KB` : '-'}</td>
+                    {!localFolderMode && <td>{result.size ? `${(result.size / 1024).toFixed(1)} KB` : '-'}</td>}
+                    {localFolderMode && <td className="path-cell">{result.path}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -425,7 +496,7 @@ const OCRTab: React.FC = () => {
       <div className="ocr-info">
         <h3>About OCR Processing</h3>
         <p>
-          This tool allows you to upload newspaper images and extract text using Optical Character Recognition (OCR).
+          This tool allows you to process newspaper images and extract text using Optical Character Recognition (OCR).
           The extracted text is then processed for:
         </p>
         <ul>
@@ -433,6 +504,14 @@ const OCRTab: React.FC = () => {
           <li>Named entity recognition (people, organizations, locations)</li>
           <li>Sentiment analysis</li>
           <li>Topic classification</li>
+        </ul>
+        <p>
+          <strong>Processing modes:</strong>
+        </p>
+        <ul>
+          <li><strong>Single Upload:</strong> Upload and process one image at a time</li>
+          <li><strong>Bulk Upload:</strong> Upload and process multiple images from a folder</li>
+          <li><strong>Local Folder:</strong> Process images directly from a local folder path without uploading (recommended for large batches)</li>
         </ul>
         <p>
           <strong>Processing time:</strong> Typically 5-10 minutes per newspaper page depending on image quality and size.
