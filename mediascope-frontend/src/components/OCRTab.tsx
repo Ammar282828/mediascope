@@ -214,7 +214,7 @@ const OCRTab: React.FC = () => {
             setPreviewUrl(null);
           }}
         >
-          Bulk Upload (Up to 50)
+          Bulk Upload
         </button>
       </div>
 
