@@ -124,7 +124,7 @@ const OCRTab: React.FC = () => {
             publication_date: fileData.extracted_date || null,
           });
           completed++;
-          console.log(`✅ Processed: ${fileData.filename}`);
+          console.log(`Processed: ${fileData.filename}`);
 
           // Track files without extracted dates
           if (!fileData.extracted_date) {
@@ -135,7 +135,7 @@ const OCRTab: React.FC = () => {
           }
         } catch (error) {
           failed++;
-          console.error(`❌ Failed: ${fileData.filename}`, error);
+          console.error(`Failed: ${fileData.filename}`, error);
         }
       }
     }
@@ -143,9 +143,9 @@ const OCRTab: React.FC = () => {
     setProcessing(false);
     setFilesNeedingDates(missingDates);
 
-    let message = `Batch processing complete!\n✅ Successful: ${completed}\n❌ Failed: ${failed}`;
+    let message = `Batch processing complete!\nSuccessful: ${completed}\nFailed: ${failed}`;
     if (missingDates.length > 0) {
-      message += `\n\n⚠️ ${missingDates.length} files processed without date detection.\nYou can update dates later if needed.`;
+      message += `\n\n${missingDates.length} files processed without date detection.\nYou can update dates later if needed.`;
     }
     alert(message);
   };
@@ -191,7 +191,7 @@ const OCRTab: React.FC = () => {
   return (
     <div className="ocr-view">
       <div className="ocr-header">
-        <h2>📰 OCR Processing</h2>
+        <h2>OCR Processing</h2>
         <p className="tagline">Upload newspaper images for text extraction and analysis</p>
       </div>
 
@@ -204,7 +204,7 @@ const OCRTab: React.FC = () => {
             setBulkResults(null);
           }}
         >
-          📄 Single Upload
+          Single Upload
         </button>
         <button
           className={bulkMode ? 'active' : ''}
@@ -214,7 +214,7 @@ const OCRTab: React.FC = () => {
             setPreviewUrl(null);
           }}
         >
-          📚 Bulk Upload (Up to 50)
+          Bulk Upload (Up to 50)
         </button>
       </div>
 
@@ -231,12 +231,11 @@ const OCRTab: React.FC = () => {
               {...(bulkMode ? { webkitdirectory: "", directory: "" } : {})}
             />
             <label htmlFor="ocr-file-input" className="upload-label">
-              <div className="upload-icon">📄</div>
               <div className="upload-text">
                 {bulkMode
                   ? selectedFiles.length > 0
                     ? `${selectedFiles.length} files selected from folder`
-                    : '📁 Click to select a folder of newspaper images'
+                    : 'Click to select a folder of newspaper images'
                   : selectedFile
                   ? selectedFile.name
                   : 'Click to select a newspaper image'}
@@ -249,15 +248,15 @@ const OCRTab: React.FC = () => {
             <div className="ocr-metadata">
               {extractedDate ? (
                 <div className="auto-detected-date">
-                  ✨ Auto-detected date: <strong>{extractedDate}</strong>
+                  Auto-detected date: <strong>{extractedDate}</strong>
                 </div>
               ) : (
                 <div className="manual-date-entry">
                   <div className="warning-message">
-                    ⚠️ Could not auto-detect date. Please enter manually:
+                    Could not auto-detect date. Please enter manually:
                   </div>
                   <div className="metadata-field">
-                    <label>📅 Publication Date</label>
+                    <label>Publication Date</label>
                     <input
                       type="date"
                       value={publicationDate}
@@ -281,7 +280,7 @@ const OCRTab: React.FC = () => {
                     disabled={uploading || !!uploadedFile}
                     className="upload-btn"
                   >
-                    {uploading ? '⏳ Uploading...' : uploadedFile ? '✅ Uploaded' : '📤 Upload Image'}
+                    {uploading ? 'Uploading...' : uploadedFile ? 'Uploaded' : 'Upload Image'}
                   </button>
 
                   {uploadedFile && (
@@ -290,7 +289,7 @@ const OCRTab: React.FC = () => {
                       disabled={processing}
                       className="process-btn"
                     >
-                      {processing ? '⏳ Processing...' : '🔄 Start OCR Processing'}
+                      {processing ? 'Processing...' : 'Start OCR Processing'}
                     </button>
                   )}
                 </>
@@ -301,8 +300,8 @@ const OCRTab: React.FC = () => {
                   className="upload-btn"
                 >
                   {uploading
-                    ? '⏳ Uploading...'
-                    : `📤 Upload ${selectedFiles.length} Images`}
+                    ? 'Uploading...'
+                    : `Upload ${selectedFiles.length} Images`}
                 </button>
               )}
             </div>
@@ -319,14 +318,10 @@ const OCRTab: React.FC = () => {
 
       {ocrStatus && (
         <div className="ocr-status">
-          <h3>📊 Processing Status</h3>
+          <h3>Processing Status</h3>
           <div className="status-card">
             <div className="status-header">
               <span className={`status-badge ${ocrStatus.status}`}>
-                {ocrStatus.status === 'processing' && '⏳'}
-                {ocrStatus.status === 'completed' && '✅'}
-                {ocrStatus.status === 'failed' && '❌'}
-                {' '}
                 {ocrStatus.status.toUpperCase()}
               </span>
               {ocrStatus.progress !== undefined && (
@@ -347,13 +342,13 @@ const OCRTab: React.FC = () => {
 
             {ocrStatus.status === 'processing' && (
               <div className="status-info">
-                <p>⏱️ Estimated time: {uploadedFile?.status === 'processing' ? '5-10 minutes' : 'Calculating...'}</p>
+                <p>Estimated time: {uploadedFile?.status === 'processing' ? '5-10 minutes' : 'Calculating...'}</p>
               </div>
             )}
 
             {ocrStatus.status === 'completed' && (
               <div className="status-success">
-                <p>✅ OCR processing completed successfully!</p>
+                <p>OCR processing completed successfully.</p>
                 <p>The extracted articles have been added to the database and are now searchable.</p>
               </div>
             )}
@@ -363,18 +358,18 @@ const OCRTab: React.FC = () => {
 
       {bulkResults && (
         <div className="bulk-results">
-          <h3>📊 Bulk Upload Results</h3>
+          <h3>Bulk Upload Results</h3>
           <div className="bulk-summary">
             <div className="summary-stat success">
-              <div className="stat-label">✅ Successful</div>
+              <div className="stat-label">Successful</div>
               <div className="stat-value">{bulkResults.successful}</div>
             </div>
             <div className="summary-stat failed">
-              <div className="stat-label">❌ Failed</div>
+              <div className="stat-label">Failed</div>
               <div className="stat-value">{bulkResults.failed}</div>
             </div>
             <div className="summary-stat total">
-              <div className="stat-label">📁 Total</div>
+              <div className="stat-label">Total</div>
               <div className="stat-value">{bulkResults.total_files}</div>
             </div>
           </div>
@@ -395,7 +390,7 @@ const OCRTab: React.FC = () => {
                     <td>{result.filename}</td>
                     <td>
                       <span className={`status-badge ${result.status}`}>
-                        {result.status === 'uploaded' ? '✅ Uploaded' : '❌ Error'}
+                        {result.status === 'uploaded' ? 'Uploaded' : 'Error'}
                       </span>
                     </td>
                     <td>{result.extracted_date || 'Not detected'}</td>
@@ -410,7 +405,7 @@ const OCRTab: React.FC = () => {
 
       {filesNeedingDates.length > 0 && (
         <div className="files-needing-dates">
-          <h3>⚠️ Files Processed Without Date Detection</h3>
+          <h3>Files Processed Without Date Detection</h3>
           <p className="info-message">
             The following {filesNeedingDates.length} file(s) were processed successfully but dates could not be auto-detected.
             They were processed with default dates. You can update them later in the database if needed.
@@ -420,7 +415,7 @@ const OCRTab: React.FC = () => {
               <div key={idx} className="file-item">
                 <span className="file-index">#{file.index}</span>
                 <span className="file-name">{file.filename}</span>
-                <span className="file-status">📅 No date detected</span>
+                <span className="file-status">No date detected</span>
               </div>
             ))}
           </div>
@@ -428,16 +423,16 @@ const OCRTab: React.FC = () => {
       )}
 
       <div className="ocr-info">
-        <h3>ℹ️ About OCR Processing</h3>
+        <h3>About OCR Processing</h3>
         <p>
           This tool allows you to upload newspaper images and extract text using Optical Character Recognition (OCR).
           The extracted text is then processed for:
         </p>
         <ul>
-          <li>📝 Article extraction and segmentation</li>
-          <li>🎯 Named entity recognition (people, organizations, locations)</li>
-          <li>😊 Sentiment analysis</li>
-          <li>🏷️ Topic classification</li>
+          <li>Article extraction and segmentation</li>
+          <li>Named entity recognition (people, organizations, locations)</li>
+          <li>Sentiment analysis</li>
+          <li>Topic classification</li>
         </ul>
         <p>
           <strong>Processing time:</strong> Typically 5-10 minutes per newspaper page depending on image quality and size.
