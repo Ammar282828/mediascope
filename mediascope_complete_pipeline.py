@@ -16,6 +16,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Image processing
 from PIL import Image, ImageEnhance
@@ -39,8 +43,8 @@ from dataclasses import dataclass
 @dataclass
 class Config:
     """Configuration for MediaScope pipeline"""
-    # Gemini API
-    GEMINI_API_KEY: str = "AIzaSyDAZVe8H9Xsrh86xQW7DDgmmHdnyTeVJ8E"
+    # Gemini API - Read from environment variable or use default
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "AIzaSyClPZG8_B4rieQwSMkXGYDJU5MgMtW9H6k")
     GEMINI_MODEL: str = "gemini-3-pro-preview"
     
     # PostgreSQL
