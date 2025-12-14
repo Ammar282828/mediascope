@@ -84,19 +84,19 @@ class MediaScopeDatabase:
                 user=self.config.DB_USER,
                 password=self.config.DB_PASSWORD
             )
-            print("✅ Connected to PostgreSQL")
-            
+            print("[OK] Connected to PostgreSQL")
+
             # Elasticsearch connection
             self.es_client = Elasticsearch(
                 [f"http://{self.config.ES_HOST}:{self.config.ES_PORT}"]
             )
-            print("✅ Connected to Elasticsearch")
+            print("[OK] Connected to Elasticsearch")
             
             # Create Elasticsearch index if not exists
             self._create_es_index()
             
         except Exception as e:
-            print(f"❌ Database connection error: {e}")
+            print(f"[ERROR] Database connection error: {e}")
             raise
     
     def _create_es_index(self):
@@ -130,7 +130,7 @@ class MediaScopeDatabase:
                 }
             }
             self.es_client.indices.create(index=self.config.ES_INDEX, body=mapping)
-            print(f"✅ Created Elasticsearch index: {self.config.ES_INDEX}")
+            print(f"[OK] Created Elasticsearch index: {self.config.ES_INDEX}")
     
     def insert_newspaper(self, pub_date: datetime, page_num: int, 
                         section: str, image_path: str) -> str:
@@ -215,7 +215,7 @@ class MediaScopeDatabase:
         """Close database connections"""
         if self.pg_conn:
             self.pg_conn.close()
-        print("✅ Database connections closed")
+        print("[OK] Database connections closed")
 
 
 class ImageProcessor:
@@ -267,7 +267,7 @@ If not found, write UNKNOWN."""
             }
             
         except Exception as e:
-            print(f"  ⚠️  Metadata extraction failed: {e}")
+            print(f"  [WARNING] Metadata extraction failed: {e}")
             return {
                 'date': datetime(1990, 1, 1),
                 'page': 1,
@@ -342,9 +342,9 @@ This is for educational and historical research purposes."""
                     })
             
             return articles
-            
+
         except Exception as e:
-            print(f"  ❌ Article extraction failed: {e}")
+            print(f"  [ERROR] Article extraction failed: {e}")
             return []
 
 
@@ -355,23 +355,23 @@ class NLPProcessor:
         self.config = config
         
         # Load spaCy model
-        print("📦 Loading spaCy model...")
+        print("Loading spaCy model...")
         self.nlp = spacy.load(config.SPACY_MODEL)
-        
+
         # Load sentiment model
-        print("📦 Loading sentiment analysis model...")
+        print("Loading sentiment analysis model...")
         self.sentiment_analyzer = pipeline(
             "sentiment-analysis",
             model=config.SENTIMENT_MODEL,
             top_k=None
         )
-        
+
         # Load BERTopic
-        # print("📦 Loading topic modeling...")
+        # print("Loading topic modeling...")
         # self.embedding_model = SentenceTransformer(config.EMBEDDING_MODEL)
         self.topic_model = None  # Skip for now  # Will be trained on full dataset
-        
-        print("✅ NLP models loaded")
+
+        print("[OK] NLP models loaded")
     
     def extract_entities(self, text: str) -> List[Dict]:
         """Extract named entities using spaCy"""
@@ -417,17 +417,17 @@ class NLPProcessor:
     
     def train_topic_model(self, documents: List[str]) -> BERTopic:
         """Train BERTopic model on documents"""
-        print("🤖 Training topic model...")
-        
+        print("Training topic model...")
+
         self.topic_model = BERTopic(
             embedding_model=self.embedding_model,
             nr_topics="auto",
             min_topic_size=10
         )
-        
+
         topics, probs = self.topic_model.fit_transform(documents)
-        
-        print(f"✅ Discovered {len(set(topics))} topics")
+
+        print(f"[OK] Discovered {len(set(topics))} topics")
         return self.topic_model
     
     def assign_topic(self, text: str) -> Dict:
@@ -482,12 +482,12 @@ class MediaScopePipeline:
                 section='Main',
                 image_path=image_path
             )
-            print(f"✅ Newspaper record created: {newspaper_id}")
-            
+            print(f"[OK] Newspaper record created: {newspaper_id}")
+
             # Extract articles
-            print("📰 Extracting articles...")
+            print("Extracting articles...")
             articles = self.image_processor.extract_articles(image_path)
-            print(f"✅ Found {len(articles)} articles")
+            print(f"[OK] Found {len(articles)} articles")
             
             # Process each article
             articles_processed = 0
@@ -495,17 +495,17 @@ class MediaScopePipeline:
 
             for article in articles:
                 try:
-                    print(f"\n  📄 Article {article['number']}: {article['headline'][:50]}...")
+                    print(f"\n  Article {article['number']}: {article['headline'][:50]}...")
 
                     # NER
-                    print("    🏷️  Extracting entities...")
+                    print("    Extracting entities...")
                     entities = self.nlp_processor.extract_entities(article['text'])
-                    print(f"    ✅ Found {len(entities)} entities")
+                    print(f"    [OK] Found {len(entities)} entities")
 
                     # Sentiment
-                    print("    😊 Analyzing sentiment...")
+                    print("    Analyzing sentiment...")
                     sentiment = self.nlp_processor.analyze_sentiment(article['text'])
-                    print(f"    ✅ Sentiment: {sentiment['label']} ({sentiment['score']})")
+                    print(f"    [OK] Sentiment: {sentiment['label']} ({sentiment['score']})")
 
                     # Topic (will be assigned after batch training)
                     topic = {'topic_id': None, 'topic_label': None}
@@ -525,7 +525,7 @@ class MediaScopePipeline:
 
                     # Insert article
                     article_id = self.db.insert_article(newspaper_id, article_data)
-                    print(f"    ✅ Article saved: {article_id}")
+                    print(f"    [OK] Article saved: {article_id}")
 
                     # Insert entities
                     self.db.insert_entities(article_id, entities)
@@ -542,21 +542,21 @@ class MediaScopePipeline:
 
                 except Exception as e:
                     articles_failed += 1
-                    print(f"    ❌ Failed to process article {article.get('number', '?')}: {e}")
+                    print(f"    [ERROR] Failed to process article {article.get('number', '?')}: {e}")
                     import traceback
                     traceback.print_exc()
                     continue  # Continue with next article
 
             print(f"\n{'='*50}")
-            print(f"✅ Newspaper processing complete")
+            print(f"[OK] Newspaper processing complete")
             print(f"   Articles processed: {articles_processed}")
             if articles_failed > 0:
                 print(f"   Articles failed: {articles_failed}")
             print(f"{'='*50}")
             return True
-            
+
         except Exception as e:
-            print(f"\n❌ Error processing newspaper: {e}")
+            print(f"\n[ERROR] Error processing newspaper: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -568,16 +568,16 @@ class MediaScopePipeline:
             image_files.extend(Path(image_folder).glob(ext))
         
         if not image_files:
-            print("❌ No images found")
+            print("[ERROR] No images found")
             return
-        
+
         image_files.sort()
-        
+
         if end_idx is None:
             end_idx = len(image_files)
-        
+
         image_files = image_files[start_idx:end_idx]
-        print(f"📚 Processing newspapers {start_idx+1} to {min(end_idx, len(image_files)+start_idx)} (Total: {len(image_files)})")
+        print(f"Processing newspapers {start_idx+1} to {min(end_idx, len(image_files)+start_idx)} (Total: {len(image_files)})")
         
         success_count = 0
         fail_count = 0
@@ -594,9 +594,9 @@ class MediaScopePipeline:
         print(f"\n{'='*70}")
         print("PROCESSING COMPLETE")
         print(f"{'='*70}")
-        print(f"✅ Successful: {success_count}")
-        print(f"❌ Failed: {fail_count}")
-        print(f"📊 Total: {len(image_files)}")
+        print(f"Successful: {success_count}")
+        print(f"Failed: {fail_count}")
+        print(f"Total: {len(image_files)}")
         print(f"{'='*70}")
     
     def close(self):
@@ -628,7 +628,7 @@ def main():
         end = int(sys.argv[2]) if len(sys.argv) > 2 else None
         
         if start > 0 or end:
-            print(f"📋 Processing range: {start+1} to {end if end else 'end'}")
+            print(f"Processing range: {start+1} to {end if end else 'end'}")
         
         pipeline.process_batch(config.INPUT_FOLDER, start, end)
     finally:

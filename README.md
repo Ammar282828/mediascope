@@ -1,8 +1,8 @@
 # MediaScope - Dawn Newspaper Archive System (1990-1992)
 
-🔍 Historical newspaper archive with AI-powered search, sentiment analysis, and interactive visualizations.
+Historical newspaper archive with AI-powered search, sentiment analysis, and interactive visualizations.
 
-## ⚡ Quick Start (For Friends!)
+## Quick Start
 
 ### 1. Install Prerequisites
 
@@ -51,8 +51,6 @@ npm start
 
 **Open:** http://localhost:3000
 
-Done! 🎉
-
 ### 4. Upload Sample Newspapers (Optional)
 
 The database starts empty. To add sample newspapers:
@@ -70,20 +68,20 @@ curl -X POST "http://localhost:8000/api/ocr/upload-bulk" \
 
 ---
 
-## 📖 What It Does
+## What It Does
 
-- 🔍 **Search** - Find articles by keywords, entities, dates
-- 📊 **Analytics** - View trends, sentiment analysis, statistics
-- 🤖 **AI Summaries** - Get article summaries powered by Google Gemini
-- 📈 **Visualizations** - Interactive charts and graphs
+- **Search** - Find articles by keywords, entities, dates
+- **Analytics** - View trends, sentiment analysis, statistics
+- **AI Summaries** - Get article summaries powered by Google Gemini
+- **Visualizations** - Interactive charts and graphs
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 **Backend:** Python, FastAPI, PostgreSQL
 **Frontend:** React, TypeScript, Recharts
 **AI:** Google Gemini, spaCy NLP
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 mediascope/
@@ -95,7 +93,7 @@ mediascope/
 └── README.md                  # This file
 ```
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### "Can't connect to database"
 ```bash
@@ -134,7 +132,7 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## 🚀 Features
+## Features
 
 ### Search
 - Full-text keyword search
@@ -154,7 +152,7 @@ pip install -r requirements.txt
 - Sentiment classification
 - Topic detection
 
-## 📊 API Endpoints
+## API Endpoints
 
 Backend runs on `http://localhost:8000`
 
@@ -166,7 +164,7 @@ Backend runs on `http://localhost:8000`
 
 **Full API docs:** http://localhost:8000/docs
 
-## 🎓 Team
+## Team
 
 **Developers:**
 - Ammar Murtaza - Backend & ML
@@ -177,12 +175,10 @@ Backend runs on `http://localhost:8000`
 **Supervisor:** Dr. Faisal Alvi
 **Institution:** Habib University
 
-## 📝 License
+## License
 
 Educational project for Habib University Kaavish program.
 
 ---
 
 **Questions?** Open an issue on GitHub or contact am08721@st.habib.edu.pk
-
-**Made with ❤️ by the MediaScope Team**

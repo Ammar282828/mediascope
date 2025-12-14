@@ -18,7 +18,7 @@ NC='\033[0m' # No Color
 # Check if Python is installed
 echo -e "${YELLOW}Checking prerequisites...${NC}"
 if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is not installed. Please install it from https://www.python.org/downloads/"
+    echo "[ERROR] Python 3 is not installed. Please install it from https://www.python.org/downloads/"
     exit 1
 fi
 
@@ -27,56 +27,56 @@ PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_inf
 PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
 PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
 if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
-    echo "❌ Python 3.8 or higher required. Found: $PYTHON_VERSION"
+    echo "[ERROR] Python 3.8 or higher required. Found: $PYTHON_VERSION"
     exit 1
 fi
-echo "✅ Python $PYTHON_VERSION found"
+echo "[OK] Python $PYTHON_VERSION found"
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed. Please install it from https://nodejs.org/"
+    echo "[ERROR] Node.js is not installed. Please install it from https://nodejs.org/"
     exit 1
 fi
-echo "✅ Node.js found"
+echo "[OK] Node.js found"
 
 # Check if PostgreSQL is installed
 if ! command -v psql &> /dev/null; then
-    echo "❌ PostgreSQL is not installed. Please install it from https://www.postgresql.org/download/"
+    echo "[ERROR] PostgreSQL is not installed. Please install it from https://www.postgresql.org/download/"
     exit 1
 fi
-echo "✅ PostgreSQL found"
+echo "[OK] PostgreSQL found"
 
 echo ""
 echo -e "${GREEN}Step 1: Setting up Python virtual environment${NC}"
 python3 -m venv venv
 source venv/bin/activate
-echo "✅ Virtual environment created"
+echo "[OK] Virtual environment created"
 
 echo ""
 echo -e "${GREEN}Step 2: Installing Python dependencies${NC}"
 pip install --upgrade pip
 pip install -r requirements.txt
-echo "✅ Python packages installed"
+echo "[OK] Python packages installed"
 
 echo ""
 echo -e "${GREEN}Step 3: Installing spaCy language model${NC}"
 python -m spacy download en_core_web_sm
-echo "✅ spaCy model downloaded"
+echo "[OK] spaCy model downloaded"
 
 echo ""
 echo -e "${GREEN}Step 4: Setting up PostgreSQL database${NC}"
 
 # Check if PostgreSQL is running
 if ! pg_isready -q; then
-    echo "⚠️  PostgreSQL is not running! Please start it first:"
-    echo "   → Mac: brew services start postgresql"
-    echo "   → Linux: sudo systemctl start postgresql"
+    echo "[WARNING] PostgreSQL is not running! Please start it first:"
+    echo "   Mac: brew services start postgresql"
+    echo "   Linux: sudo systemctl start postgresql"
     exit 1
 fi
 
 # Check if database exists
 if psql -lqt | cut -d \| -f 1 | grep -qw mediascope; then
-    echo "⚠️  Database 'mediascope' already exists. Skipping creation."
+    echo "[WARNING] Database 'mediascope' already exists. Skipping creation."
 else
     # Create database and user
     echo "Creating database..."
@@ -86,7 +86,7 @@ else
     psql postgres -c "CREATE USER mediascope_user WITH PASSWORD 'mediascope_pass';" 2>/dev/null || true
     psql postgres -c "GRANT ALL PRIVILEGES ON DATABASE mediascope TO mediascope_user;" 2>/dev/null || true
 
-    echo "✅ Database created"
+    echo "[OK] Database created"
 
     # Create tables from schema
     echo "Creating database tables..."
@@ -96,7 +96,7 @@ else
     psql mediascope -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mediascope_user;" 2>/dev/null || true
     psql mediascope -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mediascope_user;" 2>/dev/null || true
 
-    echo "✅ Database tables created"
+    echo "[OK] Database tables created"
 fi
 
 echo ""
@@ -122,9 +122,9 @@ ELASTICSEARCH_URL=http://elasticsearch:9200
 # Gemini API Key - GET THIS FROM: https://makersuite.google.com/app/apikey
 GEMINI_API_KEY=your_gemini_api_key_here
 EOL
-    echo "✅ .env file created"
+    echo "[OK] .env file created"
 else
-    echo "⚠️  .env file already exists. Skipping..."
+    echo "[WARNING] .env file already exists. Skipping..."
 fi
 
 echo ""
@@ -132,7 +132,7 @@ echo -e "${GREEN}Step 6: Installing frontend dependencies${NC}"
 cd mediascope-frontend
 npm install
 cd ..
-echo "✅ Frontend packages installed"
+echo "[OK] Frontend packages installed"
 
 echo ""
 echo -e "${GREEN}Step 7: Updating frontend configuration${NC}"
@@ -140,29 +140,27 @@ cat > mediascope-frontend/.env.local << EOL
 # Development API URL (localhost)
 REACT_APP_API_URL=http://localhost:8000
 EOL
-echo "✅ Frontend configured for local development"
+echo "[OK] Frontend configured for local development"
 
 echo ""
 echo "================================"
-echo -e "${GREEN}✅ Setup Complete!${NC}"
+echo -e "${GREEN}Setup Complete!${NC}"
 echo "================================"
 echo ""
-echo "📝 NEXT STEPS:"
+echo "NEXT STEPS:"
 echo ""
 echo "1. Make sure PostgreSQL is running:"
-echo "   → Mac: brew services start postgresql"
-echo "   → Linux: sudo systemctl start postgresql"
+echo "   Mac: brew services start postgresql"
+echo "   Linux: sudo systemctl start postgresql"
 echo ""
 echo "2. Start the backend (Terminal 1):"
-echo "   → source venv/bin/activate"
-echo "   → python mediascope_api.py"
+echo "   source venv/bin/activate"
+echo "   python mediascope_api.py"
 echo ""
 echo "3. Start the frontend (Terminal 2):"
-echo "   → cd mediascope-frontend"
-echo "   → npm start"
+echo "   cd mediascope-frontend"
+echo "   npm start"
 echo ""
 echo "4. Open http://localhost:3000 in your browser"
 echo ""
-echo "================================"
-echo "Happy searching! 🔍"
 echo "================================"

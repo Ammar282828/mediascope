@@ -57,10 +57,10 @@ def _init_pipeline():
         pipeline = MediaScopePipeline(config)
         pipeline.initialize()
         PIPELINE_AVAILABLE = True
-        print("✅ MediaScope OCR Pipeline initialized")
+        print("[OK] MediaScope OCR Pipeline initialized")
         return pipeline
     except Exception as e:
-        print(f"⚠️ Pipeline initialization failed: {e}")
+        print(f"[WARNING] Pipeline initialization failed: {e}")
         print(f"   OCR features will be unavailable. Install missing dependencies with: pip install spacy transformers bertopic")
         PIPELINE_AVAILABLE = False
         return None
