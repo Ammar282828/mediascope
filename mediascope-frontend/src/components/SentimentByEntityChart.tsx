@@ -32,12 +32,12 @@ const SentimentByEntityChart: React.FC = () => {
 
   const getEntityIcon = (type: string) => {
     switch(type) {
-      case 'PERSON': return '👤';
-      case 'ORG': return '🏢';
-      case 'GPE': return '📍';
-      case 'NORP': return '👥';
-      case 'EVENT': return '📅';
-      default: return '🏷️';
+      case 'PERSON': return 'P';
+      case 'ORG': return 'O';
+      case 'GPE': return 'L';
+      case 'NORP': return 'G';
+      case 'EVENT': return 'E';
+      default: return 'T';
     }
   };
 
@@ -50,18 +50,18 @@ const SentimentByEntityChart: React.FC = () => {
   return (
     <div className="sentiment-by-entity-chart">
       <div className="chart-header">
-        <h3>😊📊 Sentiment by Entity</h3>
+        <h3>Sentiment by Entity</h3>
         <select
           value={entityType}
           onChange={(e) => setEntityType(e.target.value)}
           className="entity-type-select"
         >
           <option value="">All Types</option>
-          <option value="PERSON">👤 People</option>
-          <option value="ORG">🏢 Organizations</option>
-          <option value="GPE">📍 Locations</option>
-          <option value="NORP">👥 Groups</option>
-          <option value="EVENT">📅 Events</option>
+          <option value="PERSON">People</option>
+          <option value="ORG">Organizations</option>
+          <option value="GPE">Locations</option>
+          <option value="NORP">Groups</option>
+          <option value="EVENT">Events</option>
         </select>
       </div>
 
@@ -113,9 +113,9 @@ const SentimentByEntityChart: React.FC = () => {
                   </div>
 
                   <div className="sentiment-counts">
-                    <span className="count positive">😊 {entity.positive_count}</span>
-                    <span className="count neutral">😐 {entity.neutral_count}</span>
-                    <span className="count negative">😞 {entity.negative_count}</span>
+                    <span className="count positive">+{entity.positive_count}</span>
+                    <span className="count neutral">={entity.neutral_count}</span>
+                    <span className="count negative">-{entity.negative_count}</span>
                   </div>
                 </div>
               );

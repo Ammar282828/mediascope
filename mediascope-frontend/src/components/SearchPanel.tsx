@@ -106,7 +106,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
   return (
     <div className="search-panel-enhanced">
       <div className="search-header">
-        <h2>🔍 Search Dawn Archives (1990-1992)</h2>
+        <h2>Search Dawn Archives (1990-1992)</h2>
         <div className="search-type-tabs">
           <button
             className={searchType === 'keyword' ? 'active' : ''}
@@ -142,25 +142,25 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
           className="sort-select"
           title="Sort results by"
         >
-          <option value="date">📅 Newest First</option>
-          <option value="date_asc">📅 Oldest First</option>
-          <option value="relevance">🎯 Most Relevant</option>
-          <option value="frequency">🔢 Most Mentions</option>
-          <option value="sentiment">😊 Most Positive</option>
-          <option value="sentiment_asc">😞 Most Negative</option>
+          <option value="date">Newest First</option>
+          <option value="date_asc">Oldest First</option>
+          <option value="relevance">Most Relevant</option>
+          <option value="frequency">Most Mentions</option>
+          <option value="sentiment">Most Positive</option>
+          <option value="sentiment_asc">Most Negative</option>
         </select>
         <button
           onClick={handleSearch}
           disabled={loading}
           className="search-button"
         >
-          {loading ? '⏳ Searching...' : '🔍 Search'}
+          {loading ? 'Searching...' : 'Search'}
         </button>
         <button
           onClick={() => setShowFilters(!showFilters)}
           className="filter-toggle-button"
         >
-          🎛️ Filters {activeFilterCount > 0 && `(${activeFilterCount})`}
+          Filters {activeFilterCount > 0 && `(${activeFilterCount})`}
         </button>
       </div>
 
@@ -168,7 +168,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
         <div className="filters-panel">
           <div className="filters-grid">
             <div className="filter-group">
-              <label>📅 Start Date</label>
+              <label>Start Date</label>
               <input
                 type="date"
                 value={filters.startDate}
@@ -179,7 +179,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
             </div>
 
             <div className="filter-group">
-              <label>📅 End Date</label>
+              <label>End Date</label>
               <input
                 type="date"
                 value={filters.endDate}
@@ -190,20 +190,20 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
             </div>
 
             <div className="filter-group">
-              <label>😊 Sentiment</label>
+              <label>Sentiment</label>
               <select
                 value={filters.sentiment}
                 onChange={(e) => updateFilter('sentiment', e.target.value)}
               >
                 <option value="">All Sentiments</option>
-                <option value="positive">😊 Positive</option>
-                <option value="neutral">😐 Neutral</option>
-                <option value="negative">😞 Negative</option>
+                <option value="positive">Positive</option>
+                <option value="neutral">Neutral</option>
+                <option value="negative">Negative</option>
               </select>
             </div>
 
             <div className="filter-group">
-              <label>📚 Topic</label>
+              <label>Topic</label>
               <input
                 type="text"
                 placeholder="e.g., Politics, Sports"
@@ -213,27 +213,27 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
             </div>
 
             <div className="filter-group">
-              <label>🏷️ Entity Type</label>
+              <label>Entity Type</label>
               <select
                 value={filters.entityType}
                 onChange={(e) => updateFilter('entityType', e.target.value)}
               >
                 <option value="">All Types</option>
-                <option value="PERSON">👤 People</option>
-                <option value="ORG">🏢 Organizations</option>
-                <option value="GPE">📍 Locations</option>
-                <option value="NORP">👥 Groups</option>
-                <option value="EVENT">📅 Events</option>
+                <option value="PERSON">People</option>
+                <option value="ORG">Organizations</option>
+                <option value="GPE">Locations</option>
+                <option value="NORP">Groups</option>
+                <option value="EVENT">Events</option>
               </select>
             </div>
           </div>
 
           <div className="filter-actions">
             <button onClick={clearFilters} className="clear-filters-btn">
-              🗑️ Clear Filters
+              Clear Filters
             </button>
             <button onClick={handleSearch} className="apply-filters-btn">
-              ✅ Apply Filters
+              Apply Filters
             </button>
           </div>
         </div>
@@ -241,7 +241,7 @@ const SearchPanel: React.FC<SearchPanelProps> = ({ onResults, onFiltersChange })
 
       {suggestions.length > 0 && !showFilters && (
         <div className="suggestions-panel">
-          <h4>💡 Popular Keywords:</h4>
+          <h4>Popular Keywords:</h4>
           <div className="suggestion-tags">
             {suggestions.slice(0, 20).map((s, idx) => (
               <button

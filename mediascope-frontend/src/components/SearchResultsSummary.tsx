@@ -36,21 +36,21 @@ const SearchResultsSummary: React.FC<SearchResultsSummaryProps> = ({
   return (
     <div className="search-results-summary">
       <div className="summary-header">
-        <h3>📊 Search Results: {totalResults} articles found</h3>
+        <h3>Search Results: {totalResults} articles found</h3>
         {!summary && (
           <button
             onClick={generateSummary}
             disabled={loading}
             className="generate-summary-btn"
           >
-            {loading ? '⏳ Generating AI Summary...' : '🤖 Generate AI Summary'}
+            {loading ? 'Generating AI Summary...' : 'Generate AI Summary'}
           </button>
         )}
       </div>
 
       {summary && (
         <div className="ai-summary-box">
-          <h4>🤖 AI-Generated Summary</h4>
+          <h4>AI-Generated Summary</h4>
           <div className="summary-content">
             {summary.split('\n').map((para, idx) => (
               para.trim() && <p key={idx}>{para}</p>

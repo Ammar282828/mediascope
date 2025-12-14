@@ -76,14 +76,14 @@ const ArticleDetailPage: React.FC = () => {
     return `sentiment-badge ${label}`;
   };
 
-  const getEntityIcon = (type: string) => {
+  const getEntityPrefix = (type: string) => {
     switch(type) {
-      case 'PERSON': return '👤';
-      case 'ORG': return '🏢';
-      case 'GPE': return '📍';
-      case 'NORP': return '👥';
-      case 'EVENT': return '📅';
-      default: return '🏷️';
+      case 'PERSON': return '[P]';
+      case 'ORG': return '[O]';
+      case 'GPE': return '[L]';
+      case 'NORP': return '[G]';
+      case 'EVENT': return '[E]';
+      default: return '[T]';
     }
   };
 
@@ -115,14 +115,14 @@ const ArticleDetailPage: React.FC = () => {
           </button>
           <div className="article-meta">
             <span className="article-date">
-              📅 {new Date(article.publication_date).toLocaleDateString('en-US', {
+              {new Date(article.publication_date).toLocaleDateString('en-US', {
                 year: 'numeric',
                 month: 'long',
                 day: 'numeric'
               })}
             </span>
             {article.page_number && (
-              <span className="page-number">📄 Page {article.page_number}</span>
+              <span className="page-number">Page {article.page_number}</span>
             )}
           </div>
         </div>
@@ -136,20 +136,20 @@ const ArticleDetailPage: React.FC = () => {
             {/* Article Stats */}
             <div className="article-stats">
               <span className={getSentimentBadgeClass(article.sentiment_label)}>
-                {article.sentiment_label === 'positive' && '😊 Positive'}
-                {article.sentiment_label === 'neutral' && '😐 Neutral'}
-                {article.sentiment_label === 'negative' && '😞 Negative'}
+                {article.sentiment_label === 'positive' && 'Positive'}
+                {article.sentiment_label === 'neutral' && 'Neutral'}
+                {article.sentiment_label === 'negative' && 'Negative'}
                 {' '}({article.sentiment_score.toFixed(2)})
               </span>
               {article.topic_label && (
-                <span className="topic-badge">🏷️ {article.topic_label}</span>
+                <span className="topic-badge">{article.topic_label}</span>
               )}
-              <span className="word-count">📝 {article.word_count} words</span>
+              <span className="word-count">{article.word_count} words</span>
             </div>
 
             {/* AI Summary */}
             <div className="article-summary-section">
-              <h3>✨ AI Summary</h3>
+              <h3>AI Summary</h3>
               {summary ? (
                 <div className="ai-summary">{summary}</div>
               ) : (
@@ -158,28 +158,28 @@ const ArticleDetailPage: React.FC = () => {
                   disabled={loadingSummary}
                   className="generate-summary-btn"
                 >
-                  {loadingSummary ? '⏳ Generating...' : '🤖 Generate AI Summary'}
+                  {loadingSummary ? 'Generating...' : 'Generate AI Summary'}
                 </button>
               )}
             </div>
 
             {/* Full Content */}
             <div className="article-full-content">
-              <h3>📰 Full Article</h3>
+              <h3>Full Article</h3>
               <div className="article-text">{article.content}</div>
             </div>
 
             {/* Entities */}
             {article.entities && article.entities.length > 0 && (
               <div className="article-entities">
-                <h3>🏷️ Mentioned Entities</h3>
+                <h3>Mentioned Entities</h3>
                 <div className="entities-grid">
                   {Array.from(new Set(article.entities.map((e: any) => e.text)))
                     .map((entityText, idx) => {
                       const entity = article.entities.find((e: any) => e.text === entityText);
                       return (
                         <span key={idx} className="entity-tag">
-                          {getEntityIcon(entity.type)} {entityText}
+                          {getEntityPrefix(entity.type)} {entityText}
                         </span>
                       );
                     })}
@@ -193,7 +193,7 @@ const ArticleDetailPage: React.FC = () => {
             {/* Newspaper Image */}
             {article.image_path && (
               <div className="newspaper-image-section">
-                <h3>📸 Original Page</h3>
+                <h3>Original Page</h3>
                 <img
                   src={`${API_BASE_URL}/${article.image_path}`}
                   alt="Newspaper page"
@@ -211,7 +211,7 @@ const ArticleDetailPage: React.FC = () => {
             {/* Related Articles */}
             {relatedArticles.length > 0 && (
               <div className="related-articles-section">
-                <h3>📚 More from this Issue</h3>
+                <h3>More from this Issue</h3>
                 <div className="related-articles-list">
                   {relatedArticles.map((related) => (
                     <div
@@ -223,9 +223,7 @@ const ArticleDetailPage: React.FC = () => {
                       <div className="related-preview">{related.content_preview}...</div>
                       {related.sentiment_label && (
                         <span className={getSentimentBadgeClass(related.sentiment_label)}>
-                          {related.sentiment_label === 'positive' && '😊'}
-                          {related.sentiment_label === 'neutral' && '😐'}
-                          {related.sentiment_label === 'negative' && '😞'}
+                          {related.sentiment_label}
                         </span>
                       )}
                     </div>

@@ -97,22 +97,22 @@ const ArticleDetail: React.FC = () => {
     }
   };
 
-  const getSentimentEmoji = (label: string) => {
+  const getSentimentPrefix = (label: string) => {
     switch (label) {
-      case 'positive': return '😊';
-      case 'negative': return '😞';
-      default: return '😐';
+      case 'positive': return '+';
+      case 'negative': return '-';
+      default: return '=';
     }
   };
 
-  const getEntityIcon = (type: string) => {
+  const getEntityPrefix = (type: string) => {
     switch (type) {
-      case 'PERSON': return '👤';
-      case 'ORG': return '🏢';
-      case 'GPE': return '📍';
-      case 'NORP': return '👥';
-      case 'EVENT': return '📅';
-      default: return '🏷️';
+      case 'PERSON': return '[P]';
+      case 'ORG': return '[O]';
+      case 'GPE': return '[L]';
+      case 'NORP': return '[G]';
+      case 'EVENT': return '[E]';
+      default: return '[T]';
     }
   };
 
@@ -157,11 +157,11 @@ const ArticleDetail: React.FC = () => {
           <h1 className="article-title">{article.headline}</h1>
           
           <div className="article-metadata">
-            <span className="article-date">📅 {formatDate(article.publication_date)}</span>
+            <span className="article-date">{formatDate(article.publication_date)}</span>
             {article.page_number && (
-              <span className="article-page">📄 Page {article.page_number}</span>
+              <span className="article-page">Page {article.page_number}</span>
             )}
-            <span className="article-wordcount">📊 {article.word_count} words</span>
+            <span className="article-wordcount">{article.word_count} words</span>
           </div>
 
           <div className="article-badges">
@@ -169,7 +169,7 @@ const ArticleDetail: React.FC = () => {
               className="sentiment-badge-large"
               style={{ backgroundColor: getSentimentColor(article.sentiment_label) }}
             >
-              {getSentimentEmoji(article.sentiment_label)} {article.sentiment_label}
+              {getSentimentPrefix(article.sentiment_label)} {article.sentiment_label}
               <span className="sentiment-score">
                 ({article.sentiment_score.toFixed(3)})
               </span>
@@ -177,7 +177,7 @@ const ArticleDetail: React.FC = () => {
 
             {article.topic_label && (
               <div className="topic-badge-large">
-                📚 {article.topic_label}
+                {article.topic_label}
               </div>
             )}
           </div>
@@ -193,12 +193,12 @@ const ArticleDetail: React.FC = () => {
 
         <aside className="article-sidebar">
           <div className="sidebar-section">
-            <h3>🏷️ Entities Mentioned</h3>
+            <h3>Entities Mentioned</h3>
             <div className="entities-grid">
               {article.entities.length > 0 ? (
                 article.entities.map((entity, idx) => (
                   <div key={idx} className="entity-chip">
-                    <span className="entity-icon">{getEntityIcon(entity.type)}</span>
+                    <span className="entity-icon">{getEntityPrefix(entity.type)}</span>
                     <span className="entity-text">{entity.text}</span>
                     <span className="entity-type">{entity.type}</span>
                   </div>
@@ -210,7 +210,7 @@ const ArticleDetail: React.FC = () => {
           </div>
 
           <div className="sidebar-section">
-            <h3>🤖 AI Summary</h3>
+            <h3>AI Summary</h3>
             {aiSummary ? (
               <div className="ai-summary-content">
                 <p>{aiSummary.summary}</p>
@@ -231,14 +231,14 @@ const ArticleDetail: React.FC = () => {
                 disabled={loadingSummary}
                 className="generate-summary-btn"
               >
-                {loadingSummary ? '⏳ Generating...' : '✨ Generate AI Summary'}
+                {loadingSummary ? 'Generating...' : 'Generate AI Summary'}
               </button>
             )}
           </div>
 
           {relatedArticles.length > 0 && (
             <div className="sidebar-section">
-              <h3>📰 Related Articles</h3>
+              <h3>Related Articles</h3>
               <div className="related-articles">
                 {relatedArticles.map((related) => (
                   <div

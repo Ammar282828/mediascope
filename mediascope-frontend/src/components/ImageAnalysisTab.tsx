@@ -85,7 +85,7 @@ const ImageAnalysisTab: React.FC = () => {
   return (
     <div className="image-analysis-view">
       <div className="analysis-header">
-        <h2>🖼️ Advertisement Image Analysis (Beta)</h2>
+        <h2>Advertisement Image Analysis (Beta)</h2>
         <p className="tagline">Upload advertisement images for AI-powered analysis</p>
       </div>
 
@@ -100,7 +100,7 @@ const ImageAnalysisTab: React.FC = () => {
               style={{ display: 'none' }}
             />
             <label htmlFor="ad-file-input" className="upload-label">
-              <div className="upload-icon">📤</div>
+              <div className="upload-icon">Upload</div>
               <div className="upload-text">
                 {selectedFile ? selectedFile.name : 'Click to select an advertisement image'}
               </div>
@@ -115,7 +115,7 @@ const ImageAnalysisTab: React.FC = () => {
                 disabled={uploading || !!uploadedAd}
                 className="upload-btn"
               >
-                {uploading ? '⏳ Uploading...' : uploadedAd ? '✅ Uploaded' : '📤 Upload Image'}
+                {uploading ? 'Uploading...' : uploadedAd ? 'Uploaded' : 'Upload Image'}
               </button>
 
               {uploadedAd && !analysis && (
@@ -124,7 +124,7 @@ const ImageAnalysisTab: React.FC = () => {
                   disabled={analyzing}
                   className="analyze-btn"
                 >
-                  {analyzing ? '⏳ Analyzing...' : '🔍 Analyze Image'}
+                  {analyzing ? 'Analyzing...' : 'Analyze Image'}
                 </button>
               )}
             </div>
@@ -141,7 +141,7 @@ const ImageAnalysisTab: React.FC = () => {
 
       {analysis && (
         <div className="analysis-results">
-          <h3>📊 Analysis Results</h3>
+          <h3>Analysis Results</h3>
 
           <div className="results-grid">
             <div className="result-card">
@@ -153,10 +153,6 @@ const ImageAnalysisTab: React.FC = () => {
               <div className="result-label">Sentiment</div>
               <div className="result-value sentiment">
                 <span className={`sentiment-badge ${analysis.sentiment}`}>
-                  {analysis.sentiment === 'positive' && '😊'}
-                  {analysis.sentiment === 'neutral' && '😐'}
-                  {analysis.sentiment === 'negative' && '😞'}
-                  {' '}
                   {analysis.sentiment.toUpperCase()}
                 </span>
                 <span className="score">Score: {(analysis.sentiment_score * 100).toFixed(0)}%</span>
@@ -209,7 +205,7 @@ const ImageAnalysisTab: React.FC = () => {
       )}
 
       <div className="analysis-info">
-        <h3>ℹ️ About Image Analysis</h3>
+        <h3>About Image Analysis</h3>
         <p>
           This beta feature uses AI to analyze advertisement images from historical newspapers.
           The analysis includes text detection, brand recognition, sentiment analysis, and visual characteristics.

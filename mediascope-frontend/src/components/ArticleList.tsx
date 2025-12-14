@@ -33,11 +33,11 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
     }
   };
 
-  const getSentimentEmoji = (label: string) => {
+  const getSentimentPrefix = (label: string) => {
     switch (label) {
-      case 'positive': return '😊';
-      case 'negative': return '😞';
-      default: return '😐';
+      case 'positive': return '+';
+      case 'negative': return '-';
+      default: return '=';
     }
   };
 
@@ -69,7 +69,7 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
         >
           <div className="article-header">
             <h3 className="article-headline">
-              📄 {article.headline}
+              {article.headline}
             </h3>
             <span className="article-date">
               {formatDate(article.publication_date)}
@@ -79,7 +79,7 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
           <div className="article-content-preview">
             {article.content_preview}...
             <span style={{ color: '#3b82f6', marginLeft: '8px', fontWeight: '600' }}>
-              👉 Read full article
+              Read full article
             </span>
           </div>
 
@@ -88,7 +88,7 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
               className="sentiment-badge"
               style={{ backgroundColor: getSentimentColor(article.sentiment_label) }}
             >
-              {getSentimentEmoji(article.sentiment_label)} {article.sentiment_label}
+              {getSentimentPrefix(article.sentiment_label)} {article.sentiment_label}
               <span className="sentiment-score">
                 ({article.sentiment_score?.toFixed(2)})
               </span>
@@ -96,7 +96,7 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
 
             {article.topic_label && (
               <div className="topic-badge">
-                📚 {article.topic_label}
+                {article.topic_label}
               </div>
             )}
 
@@ -104,10 +104,7 @@ const ArticleList: React.FC<ArticleListProps> = ({ articles }) => {
               <div className="entities-list">
                 {article.entities.slice(0, 5).map((entity, idx) => (
                   <span key={idx} className="entity-tag">
-                    {entity.type === 'PERSON' && '👤'}
-                    {entity.type === 'ORG' && '🏢'}
-                    {entity.type === 'GPE' && '📍'}
-                    {entity.text}
+                    [{entity.type}] {entity.text}
                   </span>
                 ))}
               </div>

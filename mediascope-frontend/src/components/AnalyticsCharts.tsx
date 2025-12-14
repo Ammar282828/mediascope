@@ -29,7 +29,7 @@ export const ArticlesOverTime: React.FC = () => {
 
   return (
     <div>
-      <h3>📊 Articles Published Over Time</h3>
+      <h3>Articles Published Over Time</h3>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
@@ -66,7 +66,7 @@ export const SentimentOverTime: React.FC = () => {
 
   return (
     <div>
-      <h3>😊 Sentiment Trends Over Time</h3>
+      <h3>Sentiment Trends Over Time</h3>
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data}>
           <CartesianGrid strokeDasharray="3 3" />
@@ -107,7 +107,7 @@ export const TopKeywordsCloud: React.FC = () => {
 
   return (
     <div>
-      <h3>☁️ Top Keywords</h3>
+      <h3>Top Keywords</h3>
       <div style={{ 
         display: 'flex', 
         flexWrap: 'wrap', 
