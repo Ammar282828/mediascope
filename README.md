@@ -30,17 +30,7 @@ setup.bat
 
 That's it! The setup script does everything automatically.
 
-### 3. Get Your API Key
-
-1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
-2. Click "Get API Key"
-3. Copy your key
-4. Edit the `.env` file and paste it:
-   ```
-   GEMINI_API_KEY=your_key_here
-   ```
-
-### 4. Start the App
+### 3. Start the App
 
 **Terminal 1 - Backend:**
 ```bash

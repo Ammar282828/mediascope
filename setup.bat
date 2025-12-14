@@ -115,23 +115,18 @@ echo ================================
 echo.
 echo NEXT STEPS:
 echo.
-echo 1. Get your Gemini API key:
-echo    - Visit: https://makersuite.google.com/app/apikey
-echo    - Copy your API key
-echo    - Edit .env file and add: GEMINI_API_KEY=your_key_here
-echo.
-echo 2. Make sure PostgreSQL is running:
+echo 1. Make sure PostgreSQL is running:
 echo    - Open Services app and start PostgreSQL
 echo.
-echo 3. Start the backend ^(Terminal 1^):
+echo 2. Start the backend ^(Terminal 1^):
 echo    - venv\Scripts\activate
 echo    - python mediascope_api.py
 echo.
-echo 4. Start the frontend ^(Terminal 2^):
+echo 3. Start the frontend ^(Terminal 2^):
 echo    - cd mediascope-frontend
 echo    - npm start
 echo.
-echo 5. Open http://localhost:3000 in your browser
+echo 4. Open http://localhost:3000 in your browser
 echo.
 echo ================================
 echo Happy searching!
