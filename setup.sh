@@ -21,7 +21,16 @@ if ! command -v python3 &> /dev/null; then
     echo "❌ Python 3 is not installed. Please install it from https://www.python.org/downloads/"
     exit 1
 fi
-echo "✅ Python 3 found"
+
+# Check Python version (need 3.8+)
+PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
+PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
+if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
+    echo "❌ Python 3.8 or higher required. Found: $PYTHON_VERSION"
+    exit 1
+fi
+echo "✅ Python $PYTHON_VERSION found"
 
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
@@ -57,6 +66,14 @@ echo "✅ spaCy model downloaded"
 echo ""
 echo -e "${GREEN}Step 4: Setting up PostgreSQL database${NC}"
 
+# Check if PostgreSQL is running
+if ! pg_isready -q; then
+    echo "⚠️  PostgreSQL is not running! Please start it first:"
+    echo "   → Mac: brew services start postgresql"
+    echo "   → Linux: sudo systemctl start postgresql"
+    exit 1
+fi
+
 # Check if database exists
 if psql -lqt | cut -d \| -f 1 | grep -qw mediascope; then
     echo "⚠️  Database 'mediascope' already exists. Skipping creation."
@@ -74,6 +91,11 @@ else
     # Create tables from schema
     echo "Creating database tables..."
     psql mediascope < database_schema.sql
+
+    # Grant permissions on all tables to mediascope_user
+    psql mediascope -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mediascope_user;" 2>/dev/null || true
+    psql mediascope -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mediascope_user;" 2>/dev/null || true
+
     echo "✅ Database tables created"
 fi
 

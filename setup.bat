@@ -66,6 +66,11 @@ psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE mediascope TO mediascope_u
 REM Create tables from schema
 echo Creating database tables...
 psql -U postgres -d mediascope -f database_schema.sql
+
+REM Grant permissions on all tables to mediascope_user
+psql -U postgres -d mediascope -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mediascope_user;" 2>nul
+psql -U postgres -d mediascope -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mediascope_user;" 2>nul
+
 echo [OK] Database tables created
 
 echo [OK] Database setup complete

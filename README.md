@@ -53,6 +53,21 @@ npm start
 
 Done! 🎉
 
+### 4. Upload Sample Newspapers (Optional)
+
+The database starts empty. To add sample newspapers:
+
+1. Open http://localhost:3000
+2. Look for the upload/OCR section in the UI
+3. Upload newspapers from the `input_newspapers/` folder
+4. The system will process them automatically with OCR and sentiment analysis
+
+Or use the API directly:
+```bash
+curl -X POST "http://localhost:8000/api/ocr/upload-bulk" \
+  -F "files=@input_newspapers/Mar_25_90_p1.jpg"
+```
+
 ---
 
 ## 📖 What It Does

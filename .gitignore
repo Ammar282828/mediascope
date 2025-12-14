@@ -46,12 +46,14 @@ backup.sql
 .vscode/
 .idea/
 
-# Uploaded files (optional - you may want to commit sample files)
-# Uncomment if you don't want to track these:
-# input_newspapers/
-# uploaded_newspapers/
-# ocr_uploads/
-# ad_uploads/
+# Uploaded files
+uploads/
+uploaded_newspapers/
+ocr_uploads/
+ad_uploads/
+
+# Keep sample newspapers for friends to test with
+# input_newspapers/ (keeping this committed)
 
 # Backup files
 *.backup
