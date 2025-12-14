@@ -551,9 +551,6 @@ async def upload_bulk_newspapers(files: List[UploadFile] = File(...)):
         if not files:
             raise HTTPException(400, "No files provided")
 
-        if len(files) > 50:
-            raise HTTPException(400, "Maximum 50 files allowed per batch")
-
         # Create uploads directory
         upload_dir = "uploads/newspapers"
         os.makedirs(upload_dir, exist_ok=True)
