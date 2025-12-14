@@ -10,8 +10,8 @@ Download and install these (in order):
 
 1. **Python 3.8+** → [python.org/downloads](https://www.python.org/downloads/)
 2. **Node.js 16+** → [nodejs.org](https://nodejs.org/)
-3. **PostgreSQL** → [postgresql.org/download](https://www.postgresql.org/download/)
-4. **Git** → [git-scm.com/downloads](https://git-scm.com/downloads)
+3. **Git** → [git-scm.com/downloads](https://git-scm.com/downloads)
+4. **Firebase Project** → See [Firebase Setup](#firebase-setup) below
 
 ### 2. Clone & Setup
 
@@ -68,6 +68,45 @@ curl -X POST "http://localhost:8000/api/ocr/upload-bulk" \
 
 ---
 
+## Firebase Setup
+
+MediaScope uses Firebase Firestore as its cloud database. **You need to set this up before running the app.**
+
+### Step 1: Create Firebase Project
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Click "Add project" or select an existing project
+3. Follow the setup wizard (you can disable Google Analytics)
+
+### Step 2: Enable Firestore
+
+1. In your Firebase project, click "Firestore Database" in the left sidebar
+2. Click "Create database"
+3. Choose "Start in production mode"
+4. Select a location (choose closest to your region)
+
+### Step 3: Get Service Account Key
+
+1. In Firebase Console, click the gear icon ⚙️ → "Project settings"
+2. Go to "Service accounts" tab
+3. Click "Generate new private key"
+4. Save the downloaded JSON file as `firebase-service-account.json` in your project root
+
+### Step 4: Configure Environment
+
+Add this to your `.env` file:
+
+```bash
+# Firebase Configuration
+FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json
+```
+
+**Important:** Never commit `firebase-service-account.json` to Git! It's already in `.gitignore`.
+
+For detailed instructions, see [FIREBASE_SETUP.md](FIREBASE_SETUP.md)
+
+---
+
 ## What It Does
 
 - **Search** - Find articles by keywords, entities, dates
@@ -77,9 +116,10 @@ curl -X POST "http://localhost:8000/api/ocr/upload-bulk" \
 
 ## Tech Stack
 
-**Backend:** Python, FastAPI, PostgreSQL
+**Backend:** Python, FastAPI, Firebase Firestore
 **Frontend:** React, TypeScript, Recharts
 **AI:** Google Gemini, spaCy NLP
+**Database:** Firebase Firestore (Cloud NoSQL)
 
 ## Project Structure
 
@@ -95,17 +135,27 @@ mediascope/
 
 ## Troubleshooting
 
-### "Can't connect to database"
+### "Firestore connection error"
 ```bash
-# Make sure PostgreSQL is running
-# Mac:
-brew services start postgresql
+# Check that you have the Firebase service account key file
+ls firebase-service-account.json
 
-# Windows:
-# Open Services app and start PostgreSQL
+# Make sure .env points to the correct file
+cat .env | grep FIREBASE
 
-# Linux:
-sudo systemctl start postgresql
+# Verify the JSON file is valid
+python -c "import json; json.load(open('firebase-service-account.json'))"
+```
+
+### "No module named 'firestore_db'"
+```bash
+# Make sure you're in the project directory and virtual environment is activated
+source venv/bin/activate  # Mac/Linux
+# or
+venv\Scripts\activate     # Windows
+
+# Then verify the file exists
+ls firestore_db.py
 ```
 
 ### "Port already in use"
