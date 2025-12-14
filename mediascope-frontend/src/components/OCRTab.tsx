@@ -26,6 +26,7 @@ const OCRTab: React.FC = () => {
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkResults, setBulkResults] = useState<any>(null);
   const [extractedDate, setExtractedDate] = useState<string | null>(null);
+  const [filesNeedingDates, setFilesNeedingDates] = useState<any[]>([]);
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (bulkMode) {
@@ -111,16 +112,27 @@ const OCRTab: React.FC = () => {
   const handleBulkProcess = async (uploadedFiles: any[]) => {
     let completed = 0;
     let failed = 0;
+    const missingDates: any[] = [];
 
     for (const fileData of uploadedFiles) {
       if (fileData.status === 'uploaded' && fileData.file_id) {
         try {
+          // Process even without date - backend will use default or skip date validation
           await axios.post(`${API_BASE}/ocr/process`, {
             file_id: fileData.file_id,
             file_path: fileData.path,
+            publication_date: fileData.extracted_date || null,
           });
           completed++;
           console.log(`✅ Processed: ${fileData.filename}`);
+
+          // Track files without extracted dates
+          if (!fileData.extracted_date) {
+            missingDates.push({
+              ...fileData,
+              index: uploadedFiles.indexOf(fileData) + 1,
+            });
+          }
         } catch (error) {
           failed++;
           console.error(`❌ Failed: ${fileData.filename}`, error);
@@ -129,7 +141,13 @@ const OCRTab: React.FC = () => {
     }
 
     setProcessing(false);
-    alert(`Batch processing complete!\n✅ Successful: ${completed}\n❌ Failed: ${failed}`);
+    setFilesNeedingDates(missingDates);
+
+    let message = `Batch processing complete!\n✅ Successful: ${completed}\n❌ Failed: ${failed}`;
+    if (missingDates.length > 0) {
+      message += `\n\n⚠️ ${missingDates.length} files processed without date detection.\nYou can update dates later if needed.`;
+    }
+    alert(message);
   };
 
   const handleStartOCR = async () => {
@@ -386,6 +404,25 @@ const OCRTab: React.FC = () => {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {filesNeedingDates.length > 0 && (
+        <div className="files-needing-dates">
+          <h3>⚠️ Files Processed Without Date Detection</h3>
+          <p className="info-message">
+            The following {filesNeedingDates.length} file(s) were processed successfully but dates could not be auto-detected.
+            They were processed with default dates. You can update them later in the database if needed.
+          </p>
+          <div className="files-list">
+            {filesNeedingDates.map((file, idx) => (
+              <div key={idx} className="file-item">
+                <span className="file-index">#{file.index}</span>
+                <span className="file-name">{file.filename}</span>
+                <span className="file-status">📅 No date detected</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
