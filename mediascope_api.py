@@ -15,6 +15,14 @@ import re
 from pathlib import Path
 import google.generativeai as genai
 
+# Import the pipeline
+try:
+    from mediascope_complete_pipeline import MediaScopePipeline, Config
+    PIPELINE_AVAILABLE = True
+except ImportError:
+    PIPELINE_AVAILABLE = False
+    print("⚠️ Warning: mediascope_complete_pipeline not available. OCR processing will be limited.")
+
 # Load environment variables
 load_dotenv()
 
@@ -38,6 +46,18 @@ app.add_middleware(
 
 # Mount static files for newspaper images
 app.mount("/input_newspapers", StaticFiles(directory="input_newspapers"), name="newspapers")
+
+# Initialize OCR pipeline
+pipeline = None
+if PIPELINE_AVAILABLE:
+    try:
+        config = Config()
+        pipeline = MediaScopePipeline(config)
+        pipeline.initialize()
+        print("✅ MediaScope OCR Pipeline initialized")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not initialize pipeline: {e}")
+        pipeline = None
 
 def get_db():
     """Create database connection with environment variables"""
@@ -589,21 +609,52 @@ async def upload_bulk_newspapers(files: List[UploadFile] = File(...)):
 
 @app.post("/api/ocr/process")
 def trigger_ocr_processing(request: dict):
-    """Trigger OCR processing for uploaded newspaper"""
+    """Trigger OCR processing for uploaded newspaper using MediaScope pipeline"""
     file_id = request.get('file_id')
+    file_path = request.get('file_path')  # Can be provided directly
     publication_date = request.get('publication_date')
 
-    if not file_id:
-        raise HTTPException(400, "file_id is required")
+    if not file_id and not file_path:
+        raise HTTPException(400, "file_id or file_path is required")
 
-    # This would trigger your existing OCR pipeline
-    # For now, return a processing status
-    return {
-        "file_id": file_id,
-        "status": "processing",
-        "message": "OCR processing started. Check status endpoint for updates.",
-        "estimated_time": "5-10 minutes"
-    }
+    # Determine file path
+    if not file_path:
+        # Look for file in uploads directory
+        upload_dir = "uploads/newspapers"
+        # Try common image extensions
+        for ext in ['jpg', 'jpeg', 'png', 'HEIC', 'heic']:
+            potential_path = f"{upload_dir}/{file_id}.{ext}"
+            if os.path.exists(potential_path):
+                file_path = potential_path
+                break
+
+        if not file_path:
+            raise HTTPException(404, f"File not found for file_id: {file_id}")
+
+    # Check if pipeline is available
+    if not pipeline:
+        raise HTTPException(503, "OCR pipeline not initialized. Please check server logs.")
+
+    # Process the newspaper using the pipeline
+    try:
+        success = pipeline.process_single_newspaper(file_path)
+
+        if success:
+            return {
+                "file_id": file_id,
+                "file_path": file_path,
+                "status": "completed",
+                "message": "OCR processing completed successfully. Articles extracted and stored in database."
+            }
+        else:
+            return {
+                "file_id": file_id,
+                "file_path": file_path,
+                "status": "failed",
+                "message": "OCR processing failed. Check server logs for details."
+            }
+    except Exception as e:
+        raise HTTPException(500, f"OCR processing error: {str(e)}")
 
 @app.get("/api/ocr/status/{file_id}")
 def get_ocr_status(file_id: str):
