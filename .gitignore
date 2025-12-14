@@ -1,5 +1,5 @@
+# Python
 venv/
-node_modules/
 __pycache__/
 *.pyc
 *.pyo
@@ -10,9 +10,45 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-*.log
-.DS_Store
+
+# Node/Frontend
+node_modules/
+mediascope-frontend/node_modules/
+mediascope-frontend/build/
+
+# Environment & Secrets (IMPORTANT - never commit!)
+.env
 .env.local
-*.bak*
+.env.production.local
+mediascope-frontend/.env.local
+
+# Database
 postgres_data/
 elasticsearch_data/
+*.db
+*.sqlite3
+backup.sql
+
+# Logs
+*.log
+
+# System
+.DS_Store
+
+# Backups
+*.bak*
+
+# Firebase
+.firebase/
+.firebaserc
+
+# IDE
+.vscode/
+.idea/
+
+# Uploaded files (optional - you may want to commit sample files)
+# Uncomment if you don't want to track these:
+# input_newspapers/
+# uploaded_newspapers/
+# ocr_uploads/
+# ad_uploads/

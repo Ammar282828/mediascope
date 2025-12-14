@@ -1,1190 +1,1010 @@
 #!/usr/bin/env python3
-"""
-MediaScope FastAPI Backend
-Endpoints for search, analytics, and trend visualization
-"""
-
-from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from typing import List, Optional, Dict, Any
-from datetime import datetime, date
-from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
+from typing import Optional, List
+from contextlib import contextmanager
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from elasticsearch import Elasticsearch
-import jwt
-from passlib.context import CryptContext
-from functools import lru_cache
+import os
+from dotenv import load_dotenv
+import uuid
+from datetime import datetime
+import base64
+import re
+from pathlib import Path
+import google.generativeai as genai
 
-# ============================================
-# CONFIGURATION
-# ============================================
+# Load environment variables
+load_dotenv()
 
-class Settings:
-    """Application settings"""
-    # Database
-    DB_HOST = "localhost"
-    DB_PORT = 5432
-    DB_NAME = "mediascope"
-    DB_USER = "mediascope_user"
-    DB_PASSWORD = "your_secure_password"
-    
-    # Elasticsearch
-    ES_HOST = "localhost"
-    ES_PORT = 9200
-    ES_INDEX = "mediascope_articles"
-    
-    # JWT
-    SECRET_KEY = "your-secret-key-change-in-production"
-    ALGORITHM = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Configure Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
+app = FastAPI(title="MediaScope API", version="2.0")
 
-settings = Settings()
-
-# ============================================
-# PYDANTIC MODELS
-# ============================================
-
-class ArticleResponse(BaseModel):
-    """Article response model"""
-    id: str
-    headline: str
-    content: str
-    publication_date: date
-    sentiment_score: Optional[float]
-    sentiment_label: Optional[str]
-    topic_label: Optional[str]
-    page_number: int
-    section: Optional[str]
-    entities: List[Dict[str, str]] = []
-
-
-class SearchRequest(BaseModel):
-    """Search request model"""
-    query: str = Field(..., min_length=1, max_length=200)
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    sentiment: Optional[str] = None  # 'positive', 'neutral', 'negative'
-    topic: Optional[str] = None
-    limit: int = Field(100, ge=1, le=100)
-    offset: int = Field(0, ge=0)
-
-
-class EntitySearchRequest(BaseModel):
-    """Entity search request"""
-    entity_name: str = Field(..., min_length=1)
-    entity_type: Optional[str] = None  # PERSON, ORG, GPE, etc.
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
-    limit: int = Field(100, ge=1, le=100)
-
-
-class TrendRequest(BaseModel):
-    """Trend analysis request"""
-    keywords: List[str] = Field(..., min_items=1, max_items=5)
-    start_date: date
-    end_date: date
-    granularity: str = Field("day", pattern="^(day|week|month)$")
-
-
-class TopicDistributionRequest(BaseModel):
-    """Topic distribution request"""
-    start_date: date
-    end_date: date
-
-
-class UserCreate(BaseModel):
-    """User registration model"""
-    username: str
-    email: str
-    password: str
-
-
-class UserLogin(BaseModel):
-    """User login model"""
-    email: str
-    password: str
-
-
-# ============================================
-# DATABASE CONNECTION
-# ============================================
-
-def get_db_connection():
-    """Get PostgreSQL database connection"""
-    conn = psycopg2.connect(
-        host=settings.DB_HOST,
-        port=settings.DB_PORT,
-        database=settings.DB_NAME,
-        user=settings.DB_USER,
-        password=settings.DB_PASSWORD,
-        cursor_factory=RealDictCursor
-    )
-    return conn
-
-
-def get_es_client():
-    """Get Elasticsearch client"""
-    return Elasticsearch([f"http://{settings.ES_HOST}:{settings.ES_PORT}"])
-
-
-# ============================================
-# FASTAPI APP
-# ============================================
-
-app = FastAPI(
-    title="MediaScope API",
-    description="API for Dawn Newspaper Archive Analysis (1990-1992)",
-    version="1.0.0"
-)
-
-# CORS middleware
+# Secure CORS configuration
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
+    allow_origins=allowed_origins,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],  # Allow all headers for file uploads
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    max_age=3600
 )
 
+# Mount static files for newspaper images
+app.mount("/input_newspapers", StaticFiles(directory="input_newspapers"), name="newspapers")
 
-# ============================================
-# AUTHENTICATION
-# ============================================
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-
-@app.post("/api/auth/register")
-async def register(user: UserCreate):
-    """Register a new user"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        # Hash password
-        hashed_password = pwd_context.hash(user.password)
-        
-        # Insert user
-        cur.execute("""
-            INSERT INTO users (username, email, password_hash)
-            VALUES (%s, %s, %s)
-            RETURNING id, username, email
-        """, (user.username, user.email, hashed_password))
-        
-        user_data = cur.fetchone()
-        conn.commit()
-        
-        return {"message": "User registered successfully", "user": user_data}
-    
-    except psycopg2.IntegrityError:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail="Username or email already exists")
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.post("/api/auth/login")
-async def login(credentials: UserLogin):
-    """Login user"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT id, username, email, password_hash 
-            FROM users 
-            WHERE email = %s AND is_active = TRUE
-        """, (credentials.email,))
-        
-        user = cur.fetchone()
-        
-        if not user or not pwd_context.verify(credentials.password, user['password_hash']):
-            raise HTTPException(status_code=401, detail="Invalid credentials")
-        
-        # Create JWT token
-        token_data = {"sub": str(user['id']), "email": user['email']}
-        token = jwt.encode(token_data, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-        
-        # Update last login
-        cur.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s", (user['id'],))
-        conn.commit()
-        
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "user": {
-                "id": str(user['id']),
-                "username": user['username'],
-                "email": user['email']
-            }
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
-
-
-# ============================================
-# SEARCH ENDPOINTS
-# ============================================
-
-@app.post("/api/search/keyword", response_model=Dict[str, Any])
-async def search_keyword(request: SearchRequest):
-    """
-    Search articles by keyword using Elasticsearch
-    
-    Searches in both headlines and content
-    Returns matching articles with highlighting
-    """
-    es = get_es_client()
-    
-    # Build query
-    query = {
-        "bool": {
-            "must": [
-                {
-                    "multi_match": {
-                        "query": request.query,
-                        "fields": ["headline^2", "content"],
-                        "type": "best_fields"
-                    }
-                }
-            ],
-            "filter": []
-        }
-    }
-    
-    # Date range filter
-    if request.start_date or request.end_date:
-        date_range = {}
-        if request.start_date:
-            date_range["gte"] = request.start_date.isoformat()
-        if request.end_date:
-            date_range["lte"] = request.end_date.isoformat()
-        
-        query["bool"]["filter"].append({
-            "range": {"publication_date": date_range}
-        })
-    
-    # Sentiment filter
-    if request.sentiment:
-        query["bool"]["filter"].append({
-            "term": {"sentiment_label": request.sentiment}
-        })
-    
-    # Topic filter
-    if request.topic:
-        query["bool"]["filter"].append({
-            "term": {"topic_label": request.topic}
-        })
-    
-    # Execute search
-    result = es.search(
-        index=settings.ES_INDEX,
-        body={
-            "query": query,
-            "from": request.offset,
-            "size": request.limit,
-            "highlight": {
-                "fields": {
-                    "headline": {},
-                    "content": {"fragment_size": 150, "number_of_fragments": 3}
-                }
-            }
-        }
+def get_db():
+    """Create database connection with environment variables"""
+    return psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"),
+        database=os.getenv("DB_NAME", "mediascope"),
+        user=os.getenv("DB_USER", "mediascope_user"),
+        password=os.getenv("DB_PASSWORD", "your_secure_password"),
+        cursor_factory=RealDictCursor
     )
-    
-    # Format results
-    articles = []
-    for hit in result['hits']['hits']:
-        article = hit['_source']
-        article['id'] = hit['_id']
-        article['highlights'] = hit.get('highlight', {})
-        articles.append(article)
-    
-    return {
-        "total": result['hits']['total']['value'],
-        "articles": articles,
-        "query": request.query
+
+@contextmanager
+def get_db_cursor():
+    """Context manager for database operations with automatic cleanup"""
+    conn = get_db()
+    cur = conn.cursor()
+    try:
+        yield cur
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        conn.close()
+
+def filter_and_normalize_entities(entities):
+    """Filter out noise entities and normalize similar ones"""
+    if not entities or entities == '[]':
+        return []
+
+    # Common words and patterns to filter out
+    NOISE_WORDS = {
+        'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+        'first', 'second', 'third', 'last', 'next', 'today', 'yesterday', 'tomorrow',
+        'this', 'that', 'these', 'those', 'the', 'a', 'an', 'and', 'or', 'but',
+        'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
+        'jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'
     }
 
+    filtered = []
+    seen_normalized = {}
 
-@app.post("/api/search/entity")
-async def search_entity(request: EntitySearchRequest):
-    """
-    Search articles by entity name
-    
-    Finds all articles mentioning a specific entity (person, organization, location)
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
+    for entity in entities:
+        text = entity.get('text', '').strip()
+        entity_type = entity.get('type', '')
+
+        # Skip empty or very short entities
+        if not text or len(text) < 2:
+            continue
+
+        # Skip pure numbers
+        if text.isdigit():
+            continue
+
+        # Skip noise words
+        if text.lower() in NOISE_WORDS:
+            continue
+
+        # Skip entities that are just punctuation or special chars
+        if not any(c.isalnum() for c in text):
+            continue
+
+        # Skip noisy entity types
+        if entity_type in ['DATE', 'TIME', 'CARDINAL', 'ORDINAL', 'MONEY', 'PERCENT', 'QUANTITY']:
+            continue
+
+        # Normalize: lowercase for comparison, handle plurals
+        normalized = text.lower().rstrip('s')  # Simple plural handling
+
+        # Deduplicate based on normalized form
+        if normalized in seen_normalized:
+            # Keep the longer/capitalized version
+            existing = seen_normalized[normalized]
+            if len(text) > len(existing['text']):
+                seen_normalized[normalized] = entity
+        else:
+            seen_normalized[normalized] = entity
+
+    return list(seen_normalized.values())
+
+def extract_date_from_image(image_path: str) -> Optional[str]:
+    """Extract publication date from newspaper image using OCR"""
     try:
-        query = """
-            SELECT DISTINCT
-                a.id,
-                a.headline,
-                a.content,
-                a.sentiment_score,
-                a.sentiment_label,
-                a.topic_label,
-                n.publication_date,
-                n.page_number,
-                n.section,
-                array_agg(DISTINCT jsonb_build_object(
-                    'text', e.entity_text,
-                    'type', e.entity_type
-                )) as entities
-            FROM articles a
-            JOIN newspapers n ON a.newspaper_id = n.id
-            JOIN entities e ON e.article_id = a.id
-            WHERE e.entity_text ILIKE %s
-        """
-        params = [f"%{request.entity_name}%"]
-        
-        if request.entity_type:
-            query += " AND e.entity_type = %s"
-            params.append(request.entity_type)
-        
-        if request.start_date:
-            query += " AND n.publication_date >= %s"
-            params.append(request.start_date)
-        
-        if request.end_date:
-            query += " AND n.publication_date <= %s"
-            params.append(request.end_date)
-        
-        query += """
-            GROUP BY a.id, a.headline, a.content, a.sentiment_score, 
-                     a.sentiment_label, a.topic_label, n.publication_date, 
-                     n.page_number, n.section
-            ORDER BY n.publication_date DESC
-            LIMIT %s
-        """
-        params.append(request.limit)
-        
-        cur.execute(query, params)
-        articles = cur.fetchall()
-        
-        return {
-            "total": len(articles),
-            "entity": request.entity_name,
-            "articles": articles
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
+        # Try to use pytesseract if available
+        try:
+            import pytesseract
+            from PIL import Image
 
+            # Open image and extract text from top portion (where date usually is)
+            img = Image.open(image_path)
+            width, height = img.size
+            # Crop top 20% of image where masthead/date typically appears
+            top_section = img.crop((0, 0, width, int(height * 0.2)))
 
-@app.get("/api/search/topics")
-async def get_topics():
-    """Get all available topics"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT topic_id, topic_name, keywords, article_count
-            FROM topics
-            ORDER BY article_count DESC
-        """)
-        topics = cur.fetchall()
-        return {"topics": topics}
-    
-    finally:
-        cur.close()
-        conn.close()
+            # Extract text
+            text = pytesseract.image_to_string(top_section)
 
-
-# ============================================
-# ANALYTICS ENDPOINTS
-# ============================================
-
-@app.post("/api/analytics/keyword-trend")
-async def get_keyword_trend(request: TrendRequest):
-    """
-    Get keyword frequency trends over time
-    
-    Returns time-series data showing how often keywords appear
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        trends = {}
-        
-        for keyword in request.keywords:
-            # Use database function
-            cur.execute("""
-                SELECT * FROM get_keyword_frequency(%s, %s, %s)
-            """, (keyword, request.start_date, request.end_date))
-            
-            data = cur.fetchall()
-            trends[keyword] = [
-                {
-                    "date": str(row['publication_date']),
-                    "count": row['mention_count']
-                }
-                for row in data
+            # Look for date patterns (e.g., "May 15, 1990", "15-05-1990", etc.)
+            date_patterns = [
+                r'(\d{1,2}[-/]\d{1,2}[-/]\d{4})',  # DD-MM-YYYY or MM-DD-YYYY
+                r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})',  # YYYY-MM-DD
+                r'((?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4})',  # Month DD, YYYY
+                r'(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})',  # DD Month YYYY
             ]
-        
-        return {
-            "start_date": str(request.start_date),
-            "end_date": str(request.end_date),
-            "trends": trends
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
 
+            for pattern in date_patterns:
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    date_str = match.group(1)
+                    # Try to parse and normalize to YYYY-MM-DD
+                    try:
+                        from dateutil import parser
+                        parsed_date = parser.parse(date_str, fuzzy=True)
+                        # Ensure date is in valid range (1990-1992)
+                        if 1990 <= parsed_date.year <= 1992:
+                            return parsed_date.strftime('%Y-%m-%d')
+                    except:
+                        continue
+        except ImportError:
+            # pytesseract not available
+            pass
 
-@app.post("/api/analytics/entity-trend")
-async def get_entity_trend(
-    entity_name: str,
-    entity_type: Optional[str] = None,
-    start_date: date = Query(...),
-    end_date: date = Query(...)
-):
-    """
-    Get entity mention trends over time with sentiment
-    
-    Shows how often an entity is mentioned and the average sentiment
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT * FROM get_entity_trends(%s, %s, %s, %s)
-        """, (entity_name, entity_type, start_date, end_date))
-        
-        data = cur.fetchall()
-        
-        trend = [
-            {
-                "date": str(row['publication_date']),
-                "mentions": row['mention_count'],
-                "avg_sentiment": float(row['avg_sentiment']) if row['avg_sentiment'] else 0
-            }
-            for row in data
-        ]
-        
-        return {
-            "entity": entity_name,
-            "type": entity_type,
-            "trend": trend
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.post("/api/analytics/topic-distribution")
-async def get_topic_distribution(request: TopicDistributionRequest):
-    """
-    Get topic distribution for a time period
-    
-    Shows what topics were most discussed during a specific period
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT * FROM get_topic_distribution(%s, %s)
-        """, (request.start_date, request.end_date))
-        
-        data = cur.fetchall()
-        
-        distribution = [
-            {
-                "topic_id": row['topic_id'],
-                "topic_name": row['topic_name'],
-                "article_count": row['article_count'],
-                "percentage": round(float(row['percentage']), 2)
-            }
-            for row in data
-        ]
-        
-        return {
-            "start_date": str(request.start_date),
-            "end_date": str(request.end_date),
-            "distribution": distribution
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.get("/api/analytics/sentiment-overview")
-async def get_sentiment_overview(
-    start_date: date = Query(...),
-    end_date: date = Query(...)
-):
-    """
-    Get sentiment distribution overview
-    
-    Shows breakdown of positive/neutral/negative articles
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT 
-                a.sentiment_label,
-                COUNT(*) as count,
-                AVG(a.sentiment_score) as avg_score
-            FROM articles a
-            JOIN newspapers n ON a.newspaper_id = n.id
-            WHERE n.publication_date BETWEEN %s AND %s
-            GROUP BY a.sentiment_label
-        """, (start_date, end_date))
-        
-        data = cur.fetchall()
-        
-        total = sum(row['count'] for row in data)
-        
-        sentiment_breakdown = [
-            {
-                "label": row['sentiment_label'],
-                "count": row['count'],
-                "percentage": round((row['count'] / total * 100), 2) if total > 0 else 0,
-                "avg_score": round(float(row['avg_score']), 3)
-            }
-            for row in data
-        ]
-        
-        return {
-            "start_date": str(start_date),
-            "end_date": str(end_date),
-            "total_articles": total,
-            "sentiment_breakdown": sentiment_breakdown
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
-
-
-@app.get("/api/analytics/top-entities")
-async def get_top_entities(
-    entity_type: Optional[str] = None,
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    limit: int = Query(10, ge=1, le=100)
-):
-    """
-    Get most mentioned entities
-    
-    Returns top entities by mention count
-    """
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        query = """
-            SELECT 
-                e.entity_text,
-                e.entity_type,
-                COUNT(*) as mention_count,
-                COUNT(DISTINCT a.newspaper_id) as newspaper_count,
-                AVG(a.sentiment_score) as avg_sentiment
-            FROM entities e
-            JOIN articles a ON e.article_id = a.id
-            JOIN newspapers n ON a.newspaper_id = n.id
-            WHERE 1=1
-        """
-        params = []
-        
-        if entity_type:
-            query += " AND e.entity_type = %s"
-            params.append(entity_type)
-        
-        if start_date:
-            query += " AND n.publication_date >= %s"
-            params.append(start_date)
-        
-        if end_date:
-            query += " AND n.publication_date <= %s"
-            params.append(end_date)
-        
-        query += """
-            GROUP BY e.entity_text, e.entity_type
-            ORDER BY mention_count DESC
-            LIMIT %s
-        """
-        params.append(limit)
-        
-        cur.execute(query, params)
-        entities = cur.fetchall()
-        
-        return {
-            "entities": [
-                {
-                    "text": row['entity_text'],
-                    "type": row['entity_type'],
-                    "mentions": row['mention_count'],
-                    "newspapers": row['newspaper_count'],
-                    "avg_sentiment": round(float(row['avg_sentiment']), 3) if row['avg_sentiment'] else 0
-                }
-                for row in entities
-            ]
-        }
-    
-    finally:
-        cur.close()
-        conn.close()
-
-
-# ============================================
-# ARTICLE ENDPOINTS
-# ============================================
-
-@app.get("/api/articles/{article_id}")
-async def get_article(article_id: str):
-    """Get single article by ID"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
-    try:
-        cur.execute("""
-            SELECT 
-                a.*,
-                n.publication_date,
-                n.page_number,
-                n.section,
-                n.image_path,
-                t.topic_name,
-                t.keywords as topic_keywords,
-                array_agg(jsonb_build_object(
-                    'text', e.entity_text,
-                    'type', e.entity_type
-                )) as entities
-            FROM articles a
-            JOIN newspapers n ON a.newspaper_id = n.id
-            LEFT JOIN topics t ON a.topic_id = t.topic_id
-            LEFT JOIN entities e ON e.article_id = a.id
-            WHERE a.id = %s
-            GROUP BY a.id, n.publication_date, n.page_number, n.section, 
-                     n.image_path, t.topic_name, t.keywords
-        """, (article_id,))
-        
-        article = cur.fetchone()
-        
-        if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-        
-        return article
-    
-    finally:
-        cur.close()
-        conn.close()
-
+        return None
+    except Exception as e:
+        print(f"Date extraction error: {e}")
+        return None
 
 @app.get("/api/articles")
-async def list_articles(
-    start_date: Optional[date] = None,
-    end_date: Optional[date] = None,
-    topic_id: Optional[int] = None,
-    sentiment: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=100),
-    offset: int = Query(0, ge=0)
-):
-    """List articles with filters"""
-    conn = get_db_connection()
-    cur = conn.cursor()
-    
+def list_articles(limit: int = 100, offset: int = 0):
+    """List articles with proper connection management"""
     try:
-        query = """
-            SELECT 
-                a.id,
-                a.headline,
-                LEFT(a.content, 200) as content_preview,
-                a.sentiment_score,
-                a.sentiment_label,
-                a.topic_label,
-                n.publication_date,
-                n.page_number
-            FROM articles a
-            JOIN newspapers n ON a.newspaper_id = n.id
-            WHERE 1=1
-        """
-        params = []
-        
-        if start_date:
-            query += " AND n.publication_date >= %s"
-            params.append(start_date)
-        
-        if end_date:
-            query += " AND n.publication_date <= %s"
-            params.append(end_date)
-        
-        if topic_id is not None:
-            query += " AND a.topic_id = %s"
-            params.append(topic_id)
-        
-        if sentiment:
-            query += " AND a.sentiment_label = %s"
-            params.append(sentiment)
-        
-        query += " ORDER BY n.publication_date DESC LIMIT %s OFFSET %s"
-        params.extend([limit, offset])
-        
-        cur.execute(query, params)
-        articles = cur.fetchall()
-        
-        return {"articles": articles}
-    
-    finally:
-        cur.close()
-        conn.close()
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
+                       a.sentiment_score, a.sentiment_label, a.topic_label,
+                       n.publication_date, a.word_count,
+                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
+                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                GROUP BY a.id, n.publication_date ORDER BY n.publication_date DESC LIMIT %s OFFSET %s
+            """, (limit, offset))
+            articles = cur.fetchall()
+            return {"articles": [dict(a) for a in articles]}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
 
+@app.get("/api/articles/{article_id}")
+def get_article(article_id: str):
+    """Get single article by ID"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT a.*, n.publication_date,
+                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
+                    FILTER (WHERE e.id IS NOT NULL), '[]') as entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                WHERE a.id = %s GROUP BY a.id, n.publication_date
+            """, (article_id,))
+            article = cur.fetchone()
+            if not article:
+                raise HTTPException(404, "Article not found")
+            return {"article": dict(article)}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
 
-# ============================================
-# HEALTH CHECK
-# ============================================
+@app.get("/api/analytics/articles-over-time")
+def articles_over_time():
+    """Get article count over time with proper error handling"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT TO_CHAR(n.publication_date, 'YYYY-MM') as month, COUNT(*) as count
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                GROUP BY TO_CHAR(n.publication_date, 'YYYY-MM')
+                ORDER BY month
+            """)
+            timeline = [{"month": r['month'], "count": r['count']} for r in cur.fetchall()]
+            return {"timeline": timeline}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
 
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint"""
+@app.get("/api/analytics/sentiment-over-time")
+def sentiment_over_time():
+    """Get sentiment distribution over time with proper error handling"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT TO_CHAR(n.publication_date, 'YYYY-MM') as month,
+                    SUM(CASE WHEN a.sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive,
+                    SUM(CASE WHEN a.sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral,
+                    SUM(CASE WHEN a.sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                GROUP BY TO_CHAR(n.publication_date, 'YYYY-MM')
+                ORDER BY month
+            """)
+            timeline = [dict(r) for r in cur.fetchall()]
+            return {"timeline": timeline}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/analytics/top-keywords")
+def top_keywords(limit: int = 30):
+    """Get top keywords with proper error handling"""
+    limit = min(limit, 100)  # Cap at 100
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT entity_text as keyword, COUNT(*) as frequency FROM entities
+                WHERE entity_type IN ('PERSON', 'ORG', 'GPE', 'NORP', 'EVENT')
+                GROUP BY entity_text ORDER BY frequency DESC LIMIT %s
+            """, (limit,))
+            keywords = [dict(r) for r in cur.fetchall()]
+            return {"keywords": keywords}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/suggestions/keywords")
+def keyword_suggestions(limit: int = 100):
+    """Get keyword suggestions with proper error handling"""
+    limit = min(limit, 200)  # Cap at 200
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT entity_text as keyword, COUNT(*) as frequency FROM entities
+                WHERE entity_type IN ('PERSON', 'ORG', 'GPE')
+                GROUP BY entity_text ORDER BY frequency DESC LIMIT %s
+            """, (limit,))
+            suggestions = [dict(r) for r in cur.fetchall()]
+            return {"suggestions": suggestions}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/analytics/top-entities-fixed")
+def top_entities(entity_type: Optional[str] = None, limit: int = 15):
+    """Get top entities with proper error handling"""
+    limit = min(limit, 100)  # Cap at 100
+    try:
+        with get_db_cursor() as cur:
+            if entity_type:
+                cur.execute("""
+                    SELECT entity_text as text, entity_type as type, COUNT(*) as count FROM entities
+                    WHERE entity_type = %s GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s
+                """, (entity_type, limit))
+            else:
+                cur.execute("""
+                    SELECT entity_text as text, entity_type as type, COUNT(*) as count FROM entities
+                    GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s
+                """, (limit,))
+            entities = [dict(r) for r in cur.fetchall()]
+            return {"entities": entities}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/analytics/sentiment-fixed")
+def sentiment_overview():
+    """Get sentiment overview with proper error handling"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT sentiment_label, COUNT(*) as count FROM articles
+                WHERE sentiment_label IS NOT NULL GROUP BY sentiment_label
+            """)
+            data = {"positive": 0, "neutral": 0, "negative": 0, "total": 0}
+            for r in cur.fetchall():
+                data[r['sentiment_label']] = r['count']
+                data['total'] += r['count']
+            return data
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/analytics/keyword-trend")
+def keyword_trend(request: dict):
+    """Get keyword trends over time with proper validation and error handling"""
+    keywords = request.get('keywords', [])
+    start_date = request.get('start_date')
+    end_date = request.get('end_date')
+
+    if not keywords or not isinstance(keywords, list):
+        raise HTTPException(400, "Keywords must be a non-empty list")
+
+    if not start_date or not end_date:
+        raise HTTPException(400, "start_date and end_date are required")
+
+    try:
+        with get_db_cursor() as cur:
+            trends = {}
+            for keyword in keywords[:5]:  # Limit to 5 keywords
+                cur.execute("""
+                    SELECT n.publication_date as date, COUNT(*) as count
+                    FROM articles a
+                    JOIN newspapers n ON a.newspaper_id = n.id
+                    JOIN entities e ON a.id = e.article_id
+                    WHERE e.entity_text ILIKE %s AND n.publication_date BETWEEN %s AND %s
+                    GROUP BY n.publication_date ORDER BY date
+                """, (f'%{keyword}%', start_date, end_date))
+                trends[keyword] = [{"date": str(r['date']), "count": r['count']} for r in cur.fetchall()]
+            return {"trends": trends}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/search/keyword")
+def search_keyword(request: dict):
+    """Search articles by keyword with validation, sorting, and error handling"""
+    keyword = request.get('keyword') or request.get('query', '')
+    limit = min(request.get('limit', 100), 1000)  # Cap at 1000
+    offset = max(request.get('offset', 0), 0)  # Must be >= 0
+    sort_by = request.get('sort_by', 'date')  # date, sentiment, frequency, relevance
+
+    if not keyword or len(keyword) < 1:
+        raise HTTPException(400, "Keyword is required and must be at least 1 character")
+
+    if len(keyword) > 200:
+        raise HTTPException(400, "Keyword must be less than 200 characters")
+
+    # Determine ORDER BY clause based on sort_by parameter
+    order_clauses = {
+        'date': 'n.publication_date DESC',
+        'date_asc': 'n.publication_date ASC',
+        'sentiment': 'a.sentiment_score DESC NULLS LAST',
+        'sentiment_asc': 'a.sentiment_score ASC NULLS LAST',
+        'frequency': 'entity_count DESC',
+        'relevance': 'entity_count DESC, n.publication_date DESC'
+    }
+    order_by = order_clauses.get(sort_by, 'n.publication_date DESC')
+
+    try:
+        with get_db_cursor() as cur:
+            # Modified query to include entity frequency count
+            query = f"""
+                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
+                       a.sentiment_score, a.sentiment_label, a.topic_label,
+                       n.publication_date, a.word_count,
+                       COUNT(DISTINCT e2.id) as entity_count,
+                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
+                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                LEFT JOIN entities e2 ON a.id = e2.article_id AND e2.entity_text ILIKE %s
+                WHERE EXISTS (
+                    SELECT 1 FROM entities e3
+                    WHERE e3.article_id = a.id
+                    AND e3.entity_text ILIKE %s
+                )
+                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
+                         a.topic_label, n.publication_date, a.word_count
+                ORDER BY {order_by}
+                LIMIT %s OFFSET %s
+            """
+            cur.execute(query, (f'%{keyword}%', f'%{keyword}%', limit, offset))
+            articles = cur.fetchall()
+
+            # Get total count for pagination
+            cur.execute("""
+                SELECT COUNT(DISTINCT a.id) as total
+                FROM articles a
+                JOIN entities e ON a.id = e.article_id
+                WHERE e.entity_text ILIKE %s
+            """, (f'%{keyword}%',))
+            total = cur.fetchone()['total']
+
+            # Filter entities in each article
+            articles_list = []
+            for article in articles:
+                article_dict = dict(article)
+                article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
+                articles_list.append(article_dict)
+
+            return {
+                "articles": articles_list,
+                "total": total,
+                "keyword": keyword,
+                "sort_by": sort_by
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/search/entity")
+def search_entity(request: dict):
+    """Search articles by entity name"""
+    entity_name = request.get('entity_name', '') or request.get('query', '')
+    limit = min(request.get('limit', 100), 1000)
+    offset = max(request.get('offset', 0), 0)
+
+    if not entity_name or len(entity_name) < 1:
+        raise HTTPException(400, "Entity name is required")
+
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
+                       a.sentiment_score, a.sentiment_label, a.topic_label,
+                       n.publication_date, a.word_count,
+                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
+                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                WHERE EXISTS (
+                    SELECT 1 FROM entities e2
+                    WHERE e2.article_id = a.id
+                    AND e2.entity_text ILIKE %s
+                )
+                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
+                         a.topic_label, n.publication_date, a.word_count
+                ORDER BY n.publication_date DESC
+                LIMIT %s OFFSET %s
+            """, (f'%{entity_name}%', limit, offset))
+            articles = cur.fetchall()
+
+            cur.execute("""
+                SELECT COUNT(DISTINCT a.id) as total
+                FROM articles a
+                JOIN entities e ON a.id = e.article_id
+                WHERE e.entity_text ILIKE %s
+            """, (f'%{entity_name}%',))
+            total = cur.fetchone()['total']
+
+            # Filter entities in each article
+            articles_list = []
+            for article in articles:
+                article_dict = dict(article)
+                article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
+                articles_list.append(article_dict)
+
+            return {
+                "articles": articles_list,
+                "total": total,
+                "entity_name": entity_name
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/ocr/upload")
+async def upload_newspaper_for_ocr(file: UploadFile = File(...)):
+    """Upload newspaper image for OCR processing with automatic date extraction"""
+    try:
+        # Validate file type
+        if not file.content_type or not file.content_type.startswith('image/'):
+            raise HTTPException(400, "File must be an image")
+
+        # Create uploads directory if it doesn't exist
+        upload_dir = "uploads/newspapers"
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Generate unique filename
+        file_id = str(uuid.uuid4())
+        file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        file_path = f"{upload_dir}/{file_id}.{file_ext}"
+
+        # Save file
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        # Attempt to extract date from image
+        extracted_date = extract_date_from_image(file_path)
+
+        # Return file info
+        return {
+            "file_id": file_id,
+            "filename": file.filename,
+            "path": file_path,
+            "size": len(contents),
+            "extracted_date": extracted_date,
+            "status": "uploaded",
+            "message": f"File uploaded successfully. {'Date auto-detected: ' + extracted_date if extracted_date else 'No date detected - you can set it manually.'}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Upload error: {str(e)}")
+
+@app.post("/api/ocr/upload-bulk")
+async def upload_bulk_newspapers(files: List[UploadFile] = File(...)):
+    """Upload multiple newspaper images for batch OCR processing"""
+    try:
+        if not files:
+            raise HTTPException(400, "No files provided")
+
+        if len(files) > 50:
+            raise HTTPException(400, "Maximum 50 files allowed per batch")
+
+        # Create uploads directory
+        upload_dir = "uploads/newspapers"
+        os.makedirs(upload_dir, exist_ok=True)
+
+        results = []
+        for file in files:
+            try:
+                # Validate file type
+                if not file.content_type or not file.content_type.startswith('image/'):
+                    results.append({
+                        "filename": file.filename,
+                        "status": "error",
+                        "message": "Not an image file"
+                    })
+                    continue
+
+                # Generate unique filename
+                file_id = str(uuid.uuid4())
+                file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+                file_path = f"{upload_dir}/{file_id}.{file_ext}"
+
+                # Save file
+                contents = await file.read()
+                with open(file_path, "wb") as f:
+                    f.write(contents)
+
+                # Attempt to extract date
+                extracted_date = extract_date_from_image(file_path)
+
+                results.append({
+                    "file_id": file_id,
+                    "filename": file.filename,
+                    "path": file_path,
+                    "size": len(contents),
+                    "extracted_date": extracted_date,
+                    "status": "uploaded"
+                })
+            except Exception as e:
+                results.append({
+                    "filename": file.filename,
+                    "status": "error",
+                    "message": str(e)
+                })
+
+        # Count successes
+        successful = sum(1 for r in results if r.get("status") == "uploaded")
+
+        return {
+            "total_files": len(files),
+            "successful": successful,
+            "failed": len(files) - successful,
+            "results": results,
+            "message": f"Uploaded {successful} of {len(files)} files successfully"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Bulk upload error: {str(e)}")
+
+@app.post("/api/ocr/process")
+def trigger_ocr_processing(request: dict):
+    """Trigger OCR processing for uploaded newspaper"""
+    file_id = request.get('file_id')
+    publication_date = request.get('publication_date')
+
+    if not file_id:
+        raise HTTPException(400, "file_id is required")
+
+    # This would trigger your existing OCR pipeline
+    # For now, return a processing status
     return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat()
+        "file_id": file_id,
+        "status": "processing",
+        "message": "OCR processing started. Check status endpoint for updates.",
+        "estimated_time": "5-10 minutes"
     }
 
+@app.get("/api/ocr/status/{file_id}")
+def get_ocr_status(file_id: str):
+    """Get OCR processing status"""
+    # This would check the actual processing status
+    # For now, return a mock status
+    return {
+        "file_id": file_id,
+        "status": "processing",
+        "progress": 45,
+        "message": "Extracting text from newspaper image..."
+    }
+
+@app.post("/api/ads/upload")
+async def upload_ad_image(file: UploadFile = File(...), metadata: Optional[str] = None):
+    """Upload advertisement image for analysis"""
+    try:
+        # Validate file type
+        if not file.content_type.startswith('image/'):
+            raise HTTPException(400, "File must be an image")
+
+        # Create uploads directory
+        upload_dir = "uploads/ads"
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Generate unique filename
+        file_id = str(uuid.uuid4())
+        file_ext = file.filename.split('.')[-1] if '.' in file.filename else 'jpg'
+        file_path = f"{upload_dir}/{file_id}.{file_ext}"
+
+        # Save file
+        contents = await file.read()
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        # Store in database
+        try:
+            with get_db_cursor() as cur:
+                cur.execute("""
+                    INSERT INTO ad_images (id, filename, file_path, upload_date, file_size)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (file_id, file.filename, file_path, datetime.now(), len(contents)))
+
+                return {
+                    "file_id": file_id,
+                    "filename": file.filename,
+                    "path": file_path,
+                    "size": len(contents),
+                    "status": "uploaded",
+                    "message": "Advertisement uploaded successfully"
+                }
+        except psycopg2.Error:
+            # If table doesn't exist, return without DB insert
+            return {
+                "file_id": file_id,
+                "filename": file.filename,
+                "path": file_path,
+                "size": len(contents),
+                "status": "uploaded",
+                "message": "Advertisement uploaded (DB table not configured)"
+            }
+    except Exception as e:
+        raise HTTPException(500, f"Upload error: {str(e)}")
+
+@app.post("/api/ads/analyze")
+def analyze_ad_image(request: dict):
+    """Analyze uploaded advertisement image"""
+    file_id = request.get('file_id')
+
+    if not file_id:
+        raise HTTPException(400, "file_id is required")
+
+    # Mock analysis result (integrate with your AI analysis later)
+    return {
+        "file_id": file_id,
+        "analysis": {
+            "detected_text": "Sample ad text detected",
+            "brands": ["Brand A", "Brand B"],
+            "sentiment": "positive",
+            "sentiment_score": 0.75,
+            "categories": ["consumer goods", "lifestyle"],
+            "colors": ["#FF5733", "#3498DB"],
+            "dominant_emotion": "happy",
+            "target_demographic": "adults 25-45"
+        },
+        "status": "completed"
+    }
+
+@app.get("/api/ads/list")
+def list_ads(limit: int = 50, offset: int = 0):
+    """List uploaded advertisements"""
+    limit = min(limit, 200)
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT id, filename, upload_date, file_size, analysis_status
+                FROM ad_images
+                ORDER BY upload_date DESC
+                LIMIT %s OFFSET %s
+            """, (limit, offset))
+            ads = cur.fetchall()
+            return {"ads": [dict(ad) for ad in ads]}
+    except psycopg2.Error:
+        # If table doesn't exist, return empty list
+        return {"ads": [], "message": "Ad database table not configured"}
+
+@app.get("/api/analytics/sentiment-by-entity")
+def sentiment_by_entity(entity_type: Optional[str] = None, limit: int = 20):
+    """Get sentiment breakdown for top entities"""
+    limit = min(limit, 100)
+    try:
+        with get_db_cursor() as cur:
+            query = """
+                SELECT
+                    e.entity_text,
+                    e.entity_type,
+                    COUNT(DISTINCT a.id) as article_count,
+                    AVG(a.sentiment_score) as avg_sentiment,
+                    SUM(CASE WHEN a.sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive_count,
+                    SUM(CASE WHEN a.sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral_count,
+                    SUM(CASE WHEN a.sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative_count
+                FROM entities e
+                JOIN articles a ON e.article_id = a.id
+            """
+
+            if entity_type:
+                query += " WHERE e.entity_type = %s"
+                params = (entity_type, limit)
+            else:
+                params = (limit,)
+
+            query += """
+                GROUP BY e.entity_text, e.entity_type
+                HAVING COUNT(DISTINCT a.id) >= 5
+                ORDER BY article_count DESC
+                LIMIT %s
+            """
+
+            cur.execute(query, params)
+            results = cur.fetchall()
+
+            return {
+                "entities": [dict(r) for r in results],
+                "entity_type": entity_type
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/articles/{article_id}/related")
+def get_related_articles(article_id: str, limit: int = 10):
+    """Get articles from the same newspaper"""
+    limit = min(limit, 50)
+    try:
+        with get_db_cursor() as cur:
+            # First get the newspaper_id of the current article
+            cur.execute("""
+                SELECT newspaper_id FROM articles WHERE id = %s
+            """, (article_id,))
+
+            result = cur.fetchone()
+            if not result:
+                raise HTTPException(404, "Article not found")
+
+            newspaper_id = result['newspaper_id']
+
+            # Get other articles from same newspaper
+            cur.execute("""
+                SELECT a.id, a.headline, a.sentiment_label, a.sentiment_score,
+                       LEFT(a.content, 150) as content_preview
+                FROM articles a
+                WHERE a.newspaper_id = %s AND a.id != %s
+                ORDER BY a.id
+                LIMIT %s
+            """, (newspaper_id, article_id, limit))
+
+            articles = cur.fetchall()
+
+            return {
+                "related_articles": [dict(a) for a in articles],
+                "newspaper_id": newspaper_id,
+                "count": len(articles)
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.get("/api/articles/{article_id}/full")
+def get_article_full(article_id: str):
+    """Get complete article details including newspaper image"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT
+                    a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
+                    a.topic_label, a.word_count, a.created_at,
+                    n.id as newspaper_id, n.publication_date, n.image_path,
+                    n.page_number, n.section,
+                    COALESCE(json_agg(
+                        json_build_object(
+                            'text', e.entity_text,
+                            'type', e.entity_type,
+                            'start_char', e.start_char,
+                            'end_char', e.end_char
+                        )
+                    ) FILTER (WHERE e.id IS NOT NULL), '[]') as entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                WHERE a.id = %s
+                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
+                         a.topic_label, a.word_count, a.created_at,
+                         n.id, n.publication_date, n.image_path, n.page_number, n.section
+            """, (article_id,))
+
+            article = cur.fetchone()
+
+            if not article:
+                raise HTTPException(404, "Article not found")
+
+            # Filter and normalize entities
+            article_dict = dict(article)
+            article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
+
+            return {"article": article_dict}
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/articles/{article_id}/summary")
+def generate_article_summary(article_id: str):
+    """Generate AI summary for a specific article using Gemini"""
+    try:
+        with get_db_cursor() as cur:
+            cur.execute("""
+                SELECT headline, content FROM articles WHERE id = %s
+            """, (article_id,))
+
+            article = cur.fetchone()
+
+            if not article:
+                raise HTTPException(404, "Article not found")
+
+            # Generate summary using Gemini API
+            if not GEMINI_API_KEY:
+                raise HTTPException(500, "Gemini API key not configured")
+
+            try:
+                # Use Gemini 2.0 Flash (latest preview model)
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+                prompt = f"""You are analyzing a historical newspaper article from 1990-1992.
+
+Article Headline: {article['headline']}
+
+Article Content:
+{article['content']}
+
+Please provide a concise, professional summary (3-5 sentences) covering:
+1. Main topic and key events
+2. Key people, organizations, or locations mentioned
+3. Historical significance or context
+4. Overall tone and perspective
+
+Summary:"""
+
+                response = model.generate_content(prompt)
+                summary = response.text.strip()
+
+            except Exception as e:
+                # Fallback if Gemini fails
+                summary = f"AI Summary temporarily unavailable. Article discusses: {article['headline']}"
+                print(f"Gemini API error: {str(e)}")
+
+            return {
+                "article_id": article_id,
+                "summary": summary,
+                "headline": article['headline']
+            }
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
+
+@app.post("/api/analytics/ai-summary")
+def generate_date_range_summary(request: dict):
+    """Generate AI-powered summary for articles in a date range using Gemini"""
+    start_date = request.get('start_date', '1990-01-01')
+    end_date = request.get('end_date', '1992-12-31')
+    topic = request.get('topic')
+
+    try:
+        with get_db_cursor() as cur:
+            # Get articles from date range
+            query = """
+                SELECT a.headline, a.content, a.sentiment_label, a.topic_label,
+                       n.publication_date,
+                       COALESCE(json_agg(DISTINCT e.entity_text) FILTER (WHERE e.entity_type IN ('PERSON', 'ORG', 'GPE')), '[]') as key_entities
+                FROM articles a
+                LEFT JOIN newspapers n ON a.newspaper_id = n.id
+                LEFT JOIN entities e ON a.id = e.article_id
+                WHERE n.publication_date BETWEEN %s AND %s
+            """
+
+            params = [start_date, end_date]
+
+            if topic:
+                query += " AND a.topic_label ILIKE %s"
+                params.append(f'%{topic}%')
+
+            query += """
+                GROUP BY a.id, a.headline, a.content, a.sentiment_label, a.topic_label, n.publication_date
+                ORDER BY n.publication_date DESC
+                LIMIT 100
+            """
+
+            cur.execute(query, params)
+            articles = cur.fetchall()
+
+            if not articles:
+                return {
+                    "error": "No articles found in this date range",
+                    "date_range": f"{start_date} to {end_date}",
+                    "article_count": 0
+                }
+
+            # Generate summary using Gemini
+            if not GEMINI_API_KEY:
+                raise HTTPException(500, "Gemini API key not configured")
+
+            try:
+                # Use Gemini 2.0 Flash Experimental (latest preview)
+                model = genai.GenerativeModel('gemini-2.0-flash-exp')
+
+                # Prepare data for summarization
+                article_count = len(articles)
+
+                # Get top entities
+                all_entities = []
+                for article in articles:
+                    if article['key_entities'] and article['key_entities'] != '[]':
+                        all_entities.extend(article['key_entities'])
+
+                # Count entity frequencies
+                from collections import Counter
+                entity_counts = Counter(all_entities)
+                top_entities = [entity for entity, count in entity_counts.most_common(10)]
+
+                # Get sentiment distribution
+                sentiment_counts = Counter([a['sentiment_label'] for a in articles if a['sentiment_label']])
+
+                # Sample headlines for context
+                sample_headlines = [a['headline'] for a in articles[:20]]
+
+                prompt = f"""You are analyzing {article_count} historical newspaper articles from Pakistan's Dawn newspaper, published between {start_date} and {end_date}.
+
+KEY STATISTICS:
+- Total Articles: {article_count}
+- Date Range: {start_date} to {end_date}
+- Sentiment Distribution: {dict(sentiment_counts)}
+- Top Entities: {', '.join(top_entities[:8])}
+
+SAMPLE HEADLINES:
+{chr(10).join(['- ' + h for h in sample_headlines[:15]])}
+
+Please provide a comprehensive summary (5-7 paragraphs) covering:
+
+1. **Main Themes & Events**: What were the dominant news topics and major events during this period?
+
+2. **Key Figures & Organizations**: Who were the important people, institutions, and organizations in the news?
+
+3. **Geographic Focus**: Which cities, regions, or countries were prominently featured?
+
+4. **Sentiment & Tone**: What was the overall tone of coverage (based on sentiment analysis)?
+
+5. **Historical Context**: What was happening in Pakistan and globally during this time that influenced the news?
+
+6. **Notable Patterns**: Any interesting trends, recurring themes, or significant patterns in coverage?
+
+Write in a professional, analytical tone suitable for academic or research purposes. Focus on insights that would be valuable for understanding this historical period.
+
+SUMMARY:"""
+
+                response = model.generate_content(prompt)
+                summary_text = response.text.strip()
+
+            except Exception as e:
+                summary_text = f"AI Summary generation failed. Analyzed {article_count} articles from {start_date} to {end_date}. Top entities include: {', '.join(top_entities[:5])}."
+                print(f"Gemini API error: {str(e)}")
+
+            return {
+                "date_range": f"{start_date} to {end_date}",
+                "article_count": article_count,
+                "summary": summary_text,
+                "top_entities": top_entities[:8],
+                "sentiment_distribution": dict(sentiment_counts)
+            }
+
+    except psycopg2.Error as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "message": "MediaScope API",
-        "version": "1.0.0",
-        "docs": "/docs"
-    }
-
-
-# ============================================
-# RUN SERVER
-# ============================================
+def root():
+    return {"message": "MediaScope API", "version": "2.0"}
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-@app.get("/api/articles/{article_id}")
-def get_article_detail(article_id: str):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                a.id,
-                a.headline,
-                a.content,
-                a.word_count,
-                a.sentiment_score,
-                a.sentiment_label,
-                a.topic_label,
-                a.created_at as publication_date,
-                1 as page_number,
-                COALESCE(
-                    json_agg(
-                        json_build_object('text', e.text, 'type', e.entity_type)
-                    ) FILTER (WHERE e.id IS NOT NULL),
-                    '[]'
-                ) as entities
-            FROM articles a
-            LEFT JOIN entities e ON a.id = e.article_id
-            WHERE a.id = %s
-            GROUP BY a.id, a.headline, a.content, a.word_count, 
-                     a.sentiment_score, a.sentiment_label, a.topic_label, a.created_at
-        """, (article_id,))
-        
-        article = cur.fetchone()
-        cur.close()
-        conn.close()
-        
-        if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-        
-        return {"article": dict(article)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/suggestions/keywords")
-def get_keyword_suggestions(limit: int = 100):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                entity_text as keyword,
-                entity_type as type,
-                COUNT(*) as frequency
-            FROM entities
-            GROUP BY entity_text, entity_type
-            ORDER BY frequency DESC
-            LIMIT %s
-        """, (limit,))
-        
-        suggestions = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"suggestions": [dict(s) for s in suggestions]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/analytics/ai-summary")
-def generate_ai_summary(request: dict):
-    try:
-        start_date = request.get('start_date', '1990-01-01')
-        end_date = request.get('end_date', '1992-12-31')
-        topic = request.get('topic', None)
-        
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        query = """
-            SELECT headline, LEFT(content, 500) as excerpt, 
-                   sentiment_label, topic_label
-            FROM articles 
-            WHERE created_at::date BETWEEN %s AND %s
-        """
-        params = [start_date, end_date]
-        
-        if topic:
-            query += " AND topic_label = %s"
-            params.append(topic)
-        
-        query += " ORDER BY created_at LIMIT 50"
-        
-        cur.execute(query, params)
-        articles = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        articles_text = "\n\n".join([
-            f"Headline: {a['headline']}\nExcerpt: {a['excerpt']}\nSentiment: {a['sentiment_label']}"
-            for a in articles
-        ])
-        
-        prompt = f"""Analyze these news articles from Dawn newspaper ({start_date} to {end_date}) and provide:
-1. Main themes and topics covered
-2. Overall sentiment and tone
-3. Key events or trends
-4. Notable patterns or insights
-
-Articles:
-{articles_text}
-
-Provide a concise 200-word summary."""
-        
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-3-pro-preview')
-        response = model.generate_content(prompt)
-        
-        return {
-            "summary": response.text,
-            "article_count": len(articles),
-            "date_range": f"{start_date} to {end_date}",
-            "topic": topic
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/articles/{article_id}")
-def get_article_detail(article_id: str):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                a.id,
-                a.headline,
-                a.content,
-                a.word_count,
-                a.sentiment_score,
-                a.sentiment_label,
-                a.topic_label,
-                a.created_at as publication_date,
-                1 as page_number,
-                COALESCE(
-                    json_agg(
-                        json_build_object('text', e.text, 'type', e.entity_type)
-                    ) FILTER (WHERE e.id IS NOT NULL),
-                    '[]'
-                ) as entities
-            FROM articles a
-            LEFT JOIN entities e ON a.id = e.article_id
-            WHERE a.id = %s
-            GROUP BY a.id, a.headline, a.content, a.word_count, 
-                     a.sentiment_score, a.sentiment_label, a.topic_label, a.created_at
-        """, (article_id,))
-        
-        article = cur.fetchone()
-        cur.close()
-        conn.close()
-        
-        if not article:
-            raise HTTPException(status_code=404, detail="Article not found")
-        
-        return {"article": dict(article)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/suggestions/keywords")
-def get_keyword_suggestions(limit: int = 100):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                entity_text as keyword,
-                entity_type as type,
-                COUNT(*) as frequency
-            FROM entities
-            GROUP BY entity_text, entity_type
-            ORDER BY frequency DESC
-            LIMIT %s
-        """, (limit,))
-        
-        suggestions = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"suggestions": [dict(s) for s in suggestions]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/analytics/ai-summary")
-def generate_ai_summary(request: dict):
-    try:
-        start_date = request.get('start_date', '1990-01-01')
-        end_date = request.get('end_date', '1992-12-31')
-        topic = request.get('topic', None)
-        
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        query = """
-            SELECT headline, LEFT(content, 500) as excerpt, 
-                   sentiment_label, topic_label
-            FROM articles 
-            WHERE created_at::date BETWEEN %s AND %s
-        """
-        params = [start_date, end_date]
-        
-        if topic:
-            query += " AND topic_label = %s"
-            params.append(topic)
-        
-        query += " ORDER BY created_at LIMIT 50"
-        
-        cur.execute(query, params)
-        articles = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        articles_text = "\n\n".join([
-            f"Headline: {a['headline']}\nExcerpt: {a['excerpt']}\nSentiment: {a['sentiment_label']}"
-            for a in articles
-        ])
-        
-        prompt = f"""Analyze these news articles from Dawn newspaper ({start_date} to {end_date}) and provide:
-1. Main themes and topics covered
-2. Overall sentiment and tone
-3. Key events or trends
-4. Notable patterns or insights
-
-Articles:
-{articles_text}
-
-Provide a concise 200-word summary."""
-        
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-3-pro-preview')
-        response = model.generate_content(prompt)
-        
-        return {
-            "summary": response.text,
-            "article_count": len(articles),
-            "date_range": f"{start_date} to {end_date}",
-            "topic": topic
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/keyword-trend-fixed")
-def get_keyword_trend_fixed():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                DATE(created_at) as date,
-                COUNT(*) as count
-            FROM articles
-            GROUP BY DATE(created_at)
-            ORDER BY date
-        """)
-        
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"trends": {"articles": [{"date": str(r['date']), "count": r['count']} for r in results]}}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/sentiment-fixed")
-def get_sentiment_fixed():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                sentiment_label,
-                COUNT(*) as count
-            FROM articles
-            WHERE sentiment_label IS NOT NULL
-            GROUP BY sentiment_label
-        """)
-        
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        sentiment_data = {"positive": 0, "neutral": 0, "negative": 0, "total": 0}
-        for r in results:
-            sentiment_data[r['sentiment_label']] = r['count']
-            sentiment_data['total'] += r['count']
-        
-        return sentiment_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/top-entities-fixed")
-def get_top_entities_fixed(entity_type: str = None, limit: int = 10):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        query = """
-            SELECT 
-                entity_text as text,
-                entity_type as type,
-                COUNT(*) as count
-            FROM entities
-        """
-        
-        params = []
-        if entity_type:
-            query += " WHERE entity_type = %s"
-            params.append(entity_type)
-        
-        query += " GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s"
-        params.append(limit)
-        
-        cur.execute(query, params)
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"entities": [dict(r) for r in results]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-        
-        import google.generativeai as genai
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-3-pro-preview')
-        response = model.generate_content(prompt)
-        
-        return {
-            "summary": response.text,
-            "article_count": len(articles),
-            "date_range": f"{start_date} to {end_date}",
-            "topic": topic
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/analytics/sentiment-fixed")
-def get_sentiment_fixed():
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        cur.execute("""
-            SELECT 
-                sentiment_label,
-                COUNT(*) as count
-            FROM articles
-            WHERE sentiment_label IS NOT NULL
-            GROUP BY sentiment_label
-        """)
-        
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        sentiment_data = {"positive": 0, "neutral": 0, "negative": 0, "total": 0}
-        for r in results:
-            sentiment_data[r['sentiment_label']] = r['count']
-            sentiment_data['total'] += r['count']
-        
-        return sentiment_data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/analytics/top-entities-fixed")
-def get_top_entities_fixed(entity_type: str = None, limit: int = 10):
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        query = """
-            SELECT 
-                entity_text as text,
-                entity_type as type,
-                COUNT(*) as count
-            FROM entities
-        """
-        
-        params = []
-        if entity_type:
-            query += " WHERE entity_type = %s"
-            params.append(entity_type)
-        
-        query += " GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s"
-        params.append(limit)
-        
-        cur.execute(query, params)
-        results = cur.fetchall()
-        cur.close()
-        conn.close()
-        
-        return {"entities": [dict(r) for r in results]}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
