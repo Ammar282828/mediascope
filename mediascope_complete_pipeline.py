@@ -490,51 +490,69 @@ class MediaScopePipeline:
             print(f"✅ Found {len(articles)} articles")
             
             # Process each article
+            articles_processed = 0
+            articles_failed = 0
+
             for article in articles:
-                print(f"\n  📄 Article {article['number']}: {article['headline'][:50]}...")
-                
-                # NER
-                print("    🏷️  Extracting entities...")
-                entities = self.nlp_processor.extract_entities(article['text'])
-                print(f"    ✅ Found {len(entities)} entities")
-                
-                # Sentiment
-                print("    😊 Analyzing sentiment...")
-                sentiment = self.nlp_processor.analyze_sentiment(article['text'])
-                print(f"    ✅ Sentiment: {sentiment['label']} ({sentiment['score']})")
-                
-                # Topic (will be assigned after batch training)
-                topic = {'topic_id': None, 'topic_label': None}
-                
-                # Prepare article data
-                article_data = {
-                    'article_number': article['number'],
-                    'headline': article['headline'],
-                    'content': article['text'],
-                    'word_count': article['word_count'],
-                    'bounding_box': None,
-                    'sentiment_score': sentiment['score'],
-                    'sentiment_label': sentiment['label'],
-                    'topic_id': topic['topic_id'],
-                    'topic_label': topic['topic_label']
-                }
-                
-                # Insert article
-                article_id = self.db.insert_article(newspaper_id, article_data)
-                print(f"    ✅ Article saved: {article_id}")
-                
-                # Insert entities
-                self.db.insert_entities(article_id, entities)
-                
-                # Index in Elasticsearch
-                self.db.index_article_es(
-                    article_id, 
-                    article_data, 
-                    entities,
-                    pub_date
-                )
-            
-            print(f"\n✅ Successfully processed newspaper")
+                try:
+                    print(f"\n  📄 Article {article['number']}: {article['headline'][:50]}...")
+
+                    # NER
+                    print("    🏷️  Extracting entities...")
+                    entities = self.nlp_processor.extract_entities(article['text'])
+                    print(f"    ✅ Found {len(entities)} entities")
+
+                    # Sentiment
+                    print("    😊 Analyzing sentiment...")
+                    sentiment = self.nlp_processor.analyze_sentiment(article['text'])
+                    print(f"    ✅ Sentiment: {sentiment['label']} ({sentiment['score']})")
+
+                    # Topic (will be assigned after batch training)
+                    topic = {'topic_id': None, 'topic_label': None}
+
+                    # Prepare article data
+                    article_data = {
+                        'article_number': article['number'],
+                        'headline': article['headline'],
+                        'content': article['text'],
+                        'word_count': article['word_count'],
+                        'bounding_box': None,
+                        'sentiment_score': sentiment['score'],
+                        'sentiment_label': sentiment['label'],
+                        'topic_id': topic['topic_id'],
+                        'topic_label': topic['topic_label']
+                    }
+
+                    # Insert article
+                    article_id = self.db.insert_article(newspaper_id, article_data)
+                    print(f"    ✅ Article saved: {article_id}")
+
+                    # Insert entities
+                    self.db.insert_entities(article_id, entities)
+
+                    # Index in Elasticsearch
+                    self.db.index_article_es(
+                        article_id,
+                        article_data,
+                        entities,
+                        pub_date
+                    )
+
+                    articles_processed += 1
+
+                except Exception as e:
+                    articles_failed += 1
+                    print(f"    ❌ Failed to process article {article.get('number', '?')}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue  # Continue with next article
+
+            print(f"\n{'='*50}")
+            print(f"✅ Newspaper processing complete")
+            print(f"   Articles processed: {articles_processed}")
+            if articles_failed > 0:
+                print(f"   Articles failed: {articles_failed}")
+            print(f"{'='*50}")
             return True
             
         except Exception as e:
