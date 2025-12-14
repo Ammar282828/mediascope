@@ -15,21 +15,16 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Check if Python is installed
+# Check if Python 3.13 is installed
 echo -e "${YELLOW}Checking prerequisites...${NC}"
-if ! command -v python3 &> /dev/null; then
-    echo "[ERROR] Python 3 is not installed. Please install it from https://www.python.org/downloads/"
+if ! command -v python3.13 &> /dev/null; then
+    echo "[ERROR] Python 3.13 is not installed. Please install it:"
+    echo "   Mac: brew install python@3.13"
     exit 1
 fi
 
-# Check Python version (need 3.8+)
-PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-PYTHON_MAJOR=$(echo $PYTHON_VERSION | cut -d. -f1)
-PYTHON_MINOR=$(echo $PYTHON_VERSION | cut -d. -f2)
-if [ "$PYTHON_MAJOR" -lt 3 ] || ([ "$PYTHON_MAJOR" -eq 3 ] && [ "$PYTHON_MINOR" -lt 8 ]); then
-    echo "[ERROR] Python 3.8 or higher required. Found: $PYTHON_VERSION"
-    exit 1
-fi
+# Check Python version
+PYTHON_VERSION=$(python3.13 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
 echo "[OK] Python $PYTHON_VERSION found"
 
 # Check if Node.js is installed
@@ -48,7 +43,7 @@ echo "[OK] PostgreSQL found"
 
 echo ""
 echo -e "${GREEN}Step 1: Setting up Python virtual environment${NC}"
-python3 -m venv venv
+python3.13 -m venv venv
 source venv/bin/activate
 echo "[OK] Virtual environment created"
 
