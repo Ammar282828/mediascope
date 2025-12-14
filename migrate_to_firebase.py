@@ -85,11 +85,17 @@ def migrate_articles():
         for idx, article in enumerate(articles, 1):
             try:
                 # Prepare article data for Firestore
+                # Convert date to datetime for Firestore compatibility
+                pub_date = article['publication_date']
+                if pub_date and not isinstance(pub_date, datetime):
+                    # Convert date to datetime
+                    pub_date = datetime.combine(pub_date, datetime.min.time())
+
                 article_data = {
                     'id': article['id'],
                     'headline': article['headline'] or '',
                     'content': article['content'] or '',
-                    'publication_date': article['publication_date'],
+                    'publication_date': pub_date,
                     'page_number': article['page_number'] or 1,
                     'newspaper_id': article['newspaper_id'],
                     'sentiment_score': float(article['sentiment_score']) if article['sentiment_score'] else 0.0,

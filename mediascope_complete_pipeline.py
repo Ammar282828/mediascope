@@ -31,11 +31,8 @@ from transformers import pipeline
 from bertopic import BERTopic
 from sentence_transformers import SentenceTransformer
 
-# Database
-import psycopg2
-from psycopg2.extras import RealDictCursor, execute_values
-from elasticsearch import Elasticsearch
-from elasticsearch.helpers import bulk
+# Database - Firebase Firestore
+from firestore_db import get_db as get_firestore_db
 
 # Configuration
 from dataclasses import dataclass
@@ -70,156 +67,85 @@ class Config:
 
 
 class MediaScopeDatabase:
-    """Database handler for PostgreSQL and Elasticsearch"""
-    
+    """Database handler for Firebase Firestore"""
+
     def __init__(self, config: Config):
         self.config = config
-        self.pg_conn = None
-        self.es_client = None
-        
-    def connect(self):
-        """Connect to PostgreSQL and Elasticsearch"""
-        try:
-            # PostgreSQL connection
-            self.pg_conn = psycopg2.connect(
-                host=self.config.DB_HOST,
-                port=self.config.DB_PORT,
-                database=self.config.DB_NAME,
-                user=self.config.DB_USER,
-                password=self.config.DB_PASSWORD
-            )
-            print("[OK] Connected to PostgreSQL")
+        self.db = None
 
-            # Elasticsearch connection
-            self.es_client = Elasticsearch(
-                [f"http://{self.config.ES_HOST}:{self.config.ES_PORT}"]
-            )
-            print("[OK] Connected to Elasticsearch")
-            
-            # Create Elasticsearch index if not exists
-            self._create_es_index()
-            
+    def connect(self):
+        """Connect to Firebase Firestore"""
+        try:
+            self.db = get_firestore_db()
+            print("[OK] Connected to Firebase Firestore")
         except Exception as e:
-            print(f"[ERROR] Database connection error: {e}")
+            print(f"[ERROR] Firestore connection error: {e}")
             raise
-    
-    def _create_es_index(self):
-        """Create Elasticsearch index with mappings"""
-        if not self.es_client.indices.exists(index=self.config.ES_INDEX):
-            mapping = {
-                "mappings": {
-                    "properties": {
-                        "article_id": {"type": "keyword"},
-                        "headline": {
-                            "type": "text",
-                            "analyzer": "english",
-                            "fields": {"keyword": {"type": "keyword"}}
-                        },
-                        "content": {
-                            "type": "text",
-                            "analyzer": "english"
-                        },
-                        "publication_date": {"type": "date"},
-                        "sentiment_score": {"type": "float"},
-                        "sentiment_label": {"type": "keyword"},
-                        "topic_label": {"type": "keyword"},
-                        "entities": {
-                            "type": "nested",
-                            "properties": {
-                                "text": {"type": "keyword"},
-                                "type": {"type": "keyword"}
-                            }
-                        }
-                    }
-                }
-            }
-            self.es_client.indices.create(index=self.config.ES_INDEX, body=mapping)
-            print(f"[OK] Created Elasticsearch index: {self.config.ES_INDEX}")
-    
-    def insert_newspaper(self, pub_date: datetime, page_num: int, 
+
+    def insert_newspaper(self, pub_date: datetime, page_num: int,
                         section: str, image_path: str) -> str:
-        """Insert newspaper record and return ID"""
-        with self.pg_conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO newspapers (publication_date, year, month, day, 
-                                       page_number, section, image_path)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (publication_date, page_number) 
-                DO UPDATE SET processed_at = CURRENT_TIMESTAMP
-                RETURNING id
-            """, (pub_date, pub_date.year, pub_date.month, pub_date.day, 
-                  page_num, section, image_path))
-            newspaper_id = cur.fetchone()[0]
-            self.pg_conn.commit()
-            return newspaper_id
-    
+        """Insert newspaper record and return ID (stored with article in Firestore)"""
+        # In Firestore, we store newspaper metadata with each article
+        # Generate a newspaper_id for reference
+        newspaper_id = str(uuid.uuid4())
+        return newspaper_id
+
     def insert_article(self, newspaper_id: str, article_data: Dict) -> str:
-        """Insert article and return ID"""
-        with self.pg_conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO articles (
-                    newspaper_id, article_number, headline, content, 
-                    word_count, bounding_box, sentiment_score, 
-                    sentiment_label, topic_label, topic_id
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-            """, (
-                newspaper_id,
-                article_data['article_number'],
-                article_data['headline'],
-                article_data['content'],
-                article_data['word_count'],
-                json.dumps(article_data.get('bounding_box')),
-                article_data.get('sentiment_score'),
-                article_data.get('sentiment_label'),
-                article_data.get('topic_label'),
-                article_data.get('topic_id')
-            ))
-            article_id = cur.fetchone()[0]
-            self.pg_conn.commit()
-            return article_id
-    
+        """Insert article into Firestore and return ID"""
+        article_id = str(uuid.uuid4())
+
+        # Prepare Firestore document
+        firestore_article = {
+            'id': article_id,
+            'newspaper_id': newspaper_id,
+            'headline': article_data['headline'],
+            'content': article_data['content'],
+            'word_count': article_data['word_count'],
+            'sentiment_score': article_data.get('sentiment_score', 0.0),
+            'sentiment_label': article_data.get('sentiment_label', 'neutral'),
+            'topic_label': article_data.get('topic_label', ''),
+            'topic_id': article_data.get('topic_id'),
+            'publication_date': article_data.get('publication_date', datetime(1990, 1, 1)),
+            'page_number': article_data.get('page_number', 1),
+            'entities': []  # Will be populated separately
+        }
+
+        # Store in Firestore
+        self.db.store_article(firestore_article)
+        print(f"[OK] Stored article in Firestore: {article_id}")
+
+        return article_id
+
     def insert_entities(self, article_id: str, entities: List[Dict]):
-        """Insert entities for an article"""
+        """Update article with entities in Firestore"""
         if not entities:
             return
-        
-        with self.pg_conn.cursor() as cur:
-            execute_values(cur, """
-                INSERT INTO entities (article_id, entity_text, entity_type, 
-                                     start_char, end_char, confidence)
-                VALUES %s
-            """, [(
-                article_id,
-                ent['text'],
-                ent['type'],
-                ent.get('start', 0),
-                ent.get('end', 0),
-                ent.get('confidence', 1.0)
-            ) for ent in entities])
-            self.pg_conn.commit()
-    
-    def index_article_es(self, article_id: str, article_data: Dict, 
+
+        # Get the article document
+        article_ref = self.db.db.collection('articles').document(article_id)
+        article_doc = article_ref.get()
+
+        if article_doc.exists:
+            # Format entities for Firestore
+            entity_list = [
+                {'text': ent['text'], 'type': ent['type']}
+                for ent in entities
+            ]
+
+            # Update the article with entities
+            article_ref.update({'entities': entity_list})
+
+    def index_article_es(self, article_id: str, article_data: Dict,
                          entities: List[Dict], pub_date: datetime):
-        """Index article in Elasticsearch"""
-        doc = {
-            "article_id": article_id,
-            "headline": article_data['headline'],
-            "content": article_data['content'],
-            "publication_date": pub_date.isoformat(),
-            "sentiment_score": article_data.get('sentiment_score'),
-            "sentiment_label": article_data.get('sentiment_label'),
-            "topic_label": article_data.get('topic_label'),
-            "entities": [{"text": e['text'], "type": e['type']} for e in entities]
-        }
-        self.es_client.index(index=self.config.ES_INDEX, id=article_id, body=doc)
-    
+        """No-op: Firestore handles indexing automatically"""
+        # Firestore provides built-in indexing, no need for separate Elasticsearch
+        pass
+
     def close(self):
-        """Close database connections"""
-        if self.pg_conn:
-            self.pg_conn.close()
-        print("[OK] Database connections closed")
+        """Close Firestore connection"""
+        if self.db:
+            self.db.close()
+        print("[OK] Firestore connection closed")
 
 
 class ImageProcessor:
@@ -494,16 +420,18 @@ class MediaScopePipeline:
         """Initialize pipeline components"""
         self.db.connect()
     
-    def process_single_newspaper(self, image_path: str) -> bool:
+    def process_single_newspaper(self, image_path: str, publication_date: datetime = None) -> bool:
         """Process a single newspaper image"""
         print(f"\n{'='*70}")
         print(f"Processing: {Path(image_path).name}")
         print(f"{'='*70}")
-        
+
         try:
-            # Use default metadata (no Gemini API call)
-            from datetime import date
-            pub_date = date(1990, 1, 1)  # Default date
+            # Use provided publication_date or default
+            if publication_date is None:
+                pub_date = datetime(1990, 1, 1)  # Default date
+            else:
+                pub_date = publication_date
             page_num = 1  # Default page
             
             # Insert newspaper record
@@ -551,7 +479,9 @@ class MediaScopePipeline:
                         'sentiment_score': sentiment['score'],
                         'sentiment_label': sentiment['label'],
                         'topic_id': topic['topic_id'],
-                        'topic_label': topic['topic_label']
+                        'topic_label': topic['topic_label'],
+                        'publication_date': pub_date,
+                        'page_number': page_num
                     }
 
                     # Insert article

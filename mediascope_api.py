@@ -570,8 +570,16 @@ def process_local_folder(request: dict):
             # Extract date from image
             extracted_date = extract_date_from_image(file_path)
 
+            # Parse the date if extracted
+            parsed_date = None
+            if extracted_date:
+                try:
+                    parsed_date = datetime.strptime(extracted_date, '%Y-%m-%d')
+                except:
+                    pass
+
             # Process the newspaper using the pipeline
-            success = active_pipeline.process_single_newspaper(file_path)
+            success = active_pipeline.process_single_newspaper(file_path, publication_date=parsed_date)
 
             results.append({
                 "filename": filename,
@@ -634,9 +642,17 @@ def trigger_ocr_processing(request: dict):
     if not active_pipeline:
         raise HTTPException(503, "OCR pipeline not available. Missing dependencies (spaCy, transformers, etc.). Check server logs.")
 
+    # Parse publication date if provided
+    parsed_date = None
+    if publication_date:
+        try:
+            parsed_date = datetime.strptime(publication_date, '%Y-%m-%d')
+        except:
+            pass
+
     # Process the newspaper using the pipeline
     try:
-        success = active_pipeline.process_single_newspaper(file_path)
+        success = active_pipeline.process_single_newspaper(file_path, publication_date=parsed_date)
 
         if success:
             return {
