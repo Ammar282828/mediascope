@@ -52,3 +52,8 @@ backup.sql
 # uploaded_newspapers/
 # ocr_uploads/
 # ad_uploads/
+
+# Backup files
+*.backup
+*.backup[0-9]
+*.backup[0-9][0-9]
