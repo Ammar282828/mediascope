@@ -63,6 +63,11 @@ REM Create user and grant privileges
 psql -U postgres -c "CREATE USER mediascope_user WITH PASSWORD 'mediascope_pass';" 2>nul
 psql -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE mediascope TO mediascope_user;" 2>nul
 
+REM Create tables from schema
+echo Creating database tables...
+psql -U postgres -d mediascope -f database_schema.sql
+echo [OK] Database tables created
+
 echo [OK] Database setup complete
 
 echo.

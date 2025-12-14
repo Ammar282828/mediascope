@@ -70,6 +70,11 @@ else
     psql postgres -c "GRANT ALL PRIVILEGES ON DATABASE mediascope TO mediascope_user;" 2>/dev/null || true
 
     echo "✅ Database created"
+
+    # Create tables from schema
+    echo "Creating database tables..."
+    psql mediascope < database_schema.sql
+    echo "✅ Database tables created"
 fi
 
 echo ""
