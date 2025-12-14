@@ -21,6 +21,7 @@ en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
 fastapi==0.104.1
 filelock==3.20.0
+firebase-admin==6.7.0
 fsspec==2025.10.0
 google-ai-generativelanguage==0.6.10
 google-api-core==2.28.1

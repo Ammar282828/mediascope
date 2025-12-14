@@ -4,8 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
 from contextlib import contextmanager
-import psycopg2
-from psycopg2.extras import RealDictCursor
 import os
 from dotenv import load_dotenv
 import uuid
@@ -14,6 +12,9 @@ import base64
 import re
 from pathlib import Path
 import google.generativeai as genai
+
+# Import Firebase Firestore database layer
+from firestore_db import get_db as get_firestore_db
 
 # Pipeline will be imported lazily to avoid dependency issues on startup
 PIPELINE_AVAILABLE = False
@@ -66,29 +67,20 @@ def _init_pipeline():
         return None
 
 def get_db():
-    """Create database connection with environment variables"""
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        database=os.getenv("DB_NAME", "mediascope"),
-        user=os.getenv("DB_USER", "mediascope_user"),
-        password=os.getenv("DB_PASSWORD", "your_secure_password"),
-        cursor_factory=RealDictCursor
-    )
+    """Get Firestore database instance"""
+    return get_firestore_db()
 
 @contextmanager
 def get_db_cursor():
-    """Context manager for database operations with automatic cleanup"""
-    conn = get_db()
-    cur = conn.cursor()
+    """Context manager for database operations (Firestore compatibility layer)"""
+    # For Firestore, we don't need cursors, but keep this for compatibility
+    db = get_db()
     try:
-        yield cur
-        conn.commit()
+        yield db
     except Exception as e:
-        conn.rollback()
         raise
     finally:
-        cur.close()
-        conn.close()
+        pass  # Firestore doesn't need explicit connection closing
 
 def filter_and_normalize_entities(entities):
     """Filter out noise entities and normalize similar ones"""
@@ -196,79 +188,57 @@ def extract_date_from_image(image_path: str) -> Optional[str]:
 def list_articles(limit: int = 100, offset: int = 0):
     """List articles with proper connection management"""
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
-                       a.sentiment_score, a.sentiment_label, a.topic_label,
-                       n.publication_date, a.word_count,
-                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
-                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                LEFT JOIN entities e ON a.id = e.article_id
-                GROUP BY a.id, n.publication_date ORDER BY n.publication_date DESC LIMIT %s OFFSET %s
-            """, (limit, offset))
-            articles = cur.fetchall()
-            return {"articles": [dict(a) for a in articles]}
-    except psycopg2.Error as e:
+        db = get_db()
+        # Get articles from Firestore
+        articles_ref = db.db.collection('articles').order_by('publication_date', direction='DESCENDING').limit(limit + offset)
+        articles_docs = list(articles_ref.stream())
+
+        # Apply offset manually (Firestore doesn't have native offset)
+        articles_docs = articles_docs[offset:offset + limit]
+
+        articles = []
+        for doc in articles_docs:
+            data = doc.to_dict()
+            # Add content preview
+            data['content_preview'] = data.get('content', '')[:200]
+            articles.append(data)
+
+        return {"articles": articles}
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/articles/{article_id}")
 def get_article(article_id: str):
     """Get single article by ID"""
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT a.*, n.publication_date,
-                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
-                    FILTER (WHERE e.id IS NOT NULL), '[]') as entities
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                LEFT JOIN entities e ON a.id = e.article_id
-                WHERE a.id = %s GROUP BY a.id, n.publication_date
-            """, (article_id,))
-            article = cur.fetchone()
-            if not article:
-                raise HTTPException(404, "Article not found")
-            return {"article": dict(article)}
-    except psycopg2.Error as e:
+        db = get_db()
+        article = db.get_article(article_id)
+        if not article:
+            raise HTTPException(404, "Article not found")
+        return article
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/articles-over-time")
 def articles_over_time():
     """Get article count over time with proper error handling"""
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT TO_CHAR(n.publication_date, 'YYYY-MM') as month, COUNT(*) as count
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                GROUP BY TO_CHAR(n.publication_date, 'YYYY-MM')
-                ORDER BY month
-            """)
-            timeline = [{"month": r['month'], "count": r['count']} for r in cur.fetchall()]
-            return {"timeline": timeline}
-    except psycopg2.Error as e:
+        db = get_db()
+        timeline = db.get_analytics_articles_over_time()
+        return {"timeline": timeline}
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/sentiment-over-time")
 def sentiment_over_time():
     """Get sentiment distribution over time with proper error handling"""
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT TO_CHAR(n.publication_date, 'YYYY-MM') as month,
-                    SUM(CASE WHEN a.sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive,
-                    SUM(CASE WHEN a.sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral,
-                    SUM(CASE WHEN a.sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                GROUP BY TO_CHAR(n.publication_date, 'YYYY-MM')
-                ORDER BY month
-            """)
-            timeline = [dict(r) for r in cur.fetchall()]
-            return {"timeline": timeline}
-    except psycopg2.Error as e:
+        db = get_db()
+        timeline = db.get_analytics_sentiment_over_time()
+        return {"timeline": timeline}
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/top-keywords")
@@ -276,15 +246,10 @@ def top_keywords(limit: int = 30):
     """Get top keywords with proper error handling"""
     limit = min(limit, 100)  # Cap at 100
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT entity_text as keyword, COUNT(*) as frequency FROM entities
-                WHERE entity_type IN ('PERSON', 'ORG', 'GPE', 'NORP', 'EVENT')
-                GROUP BY entity_text ORDER BY frequency DESC LIMIT %s
-            """, (limit,))
-            keywords = [dict(r) for r in cur.fetchall()]
-            return {"keywords": keywords}
-    except psycopg2.Error as e:
+        db = get_db()
+        keywords = db.get_top_keywords(limit=limit)
+        return {"keywords": keywords}
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/suggestions/keywords")
@@ -292,15 +257,10 @@ def keyword_suggestions(limit: int = 100):
     """Get keyword suggestions with proper error handling"""
     limit = min(limit, 200)  # Cap at 200
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT entity_text as keyword, COUNT(*) as frequency FROM entities
-                WHERE entity_type IN ('PERSON', 'ORG', 'GPE')
-                GROUP BY entity_text ORDER BY frequency DESC LIMIT %s
-            """, (limit,))
-            suggestions = [dict(r) for r in cur.fetchall()]
-            return {"suggestions": suggestions}
-    except psycopg2.Error as e:
+        db = get_db()
+        keywords = db.get_top_keywords(limit=limit)
+        return {"suggestions": keywords}
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/top-entities-fixed")
@@ -385,67 +345,38 @@ def search_keyword(request: dict):
     if len(keyword) > 200:
         raise HTTPException(400, "Keyword must be less than 200 characters")
 
-    # Determine ORDER BY clause based on sort_by parameter
-    order_clauses = {
-        'date': 'n.publication_date DESC',
-        'date_asc': 'n.publication_date ASC',
-        'sentiment': 'a.sentiment_score DESC NULLS LAST',
-        'sentiment_asc': 'a.sentiment_score ASC NULLS LAST',
-        'frequency': 'entity_count DESC',
-        'relevance': 'entity_count DESC, n.publication_date DESC'
-    }
-    order_by = order_clauses.get(sort_by, 'n.publication_date DESC')
-
     try:
-        with get_db_cursor() as cur:
-            # Modified query to include entity frequency count
-            query = f"""
-                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
-                       a.sentiment_score, a.sentiment_label, a.topic_label,
-                       n.publication_date, a.word_count,
-                       COUNT(DISTINCT e2.id) as entity_count,
-                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
-                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                LEFT JOIN entities e ON a.id = e.article_id
-                LEFT JOIN entities e2 ON a.id = e2.article_id AND e2.entity_text ILIKE %s
-                WHERE EXISTS (
-                    SELECT 1 FROM entities e3
-                    WHERE e3.article_id = a.id
-                    AND e3.entity_text ILIKE %s
-                )
-                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
-                         a.topic_label, n.publication_date, a.word_count
-                ORDER BY {order_by}
-                LIMIT %s OFFSET %s
-            """
-            cur.execute(query, (f'%{keyword}%', f'%{keyword}%', limit, offset))
-            articles = cur.fetchall()
+        db = get_db()
+        articles = db.search_articles(keyword, limit=limit)
 
-            # Get total count for pagination
-            cur.execute("""
-                SELECT COUNT(DISTINCT a.id) as total
-                FROM articles a
-                JOIN entities e ON a.id = e.article_id
-                WHERE e.entity_text ILIKE %s
-            """, (f'%{keyword}%',))
-            total = cur.fetchone()['total']
+        # Apply offset manually
+        total = len(articles)
+        articles = articles[offset:offset + limit]
 
-            # Filter entities in each article
-            articles_list = []
-            for article in articles:
-                article_dict = dict(article)
-                article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
-                articles_list.append(article_dict)
+        # Add content preview and filter entities
+        articles_list = []
+        for article in articles:
+            article['content_preview'] = article.get('content', '')[:200]
+            article['entities'] = filter_and_normalize_entities(article.get('entities', []))
+            articles_list.append(article)
 
-            return {
-                "articles": articles_list,
-                "total": total,
-                "keyword": keyword,
-                "sort_by": sort_by
-            }
-    except psycopg2.Error as e:
+        # Sort based on sort_by parameter
+        if sort_by == 'date':
+            articles_list.sort(key=lambda x: x.get('publication_date', ''), reverse=True)
+        elif sort_by == 'date_asc':
+            articles_list.sort(key=lambda x: x.get('publication_date', ''))
+        elif sort_by == 'sentiment':
+            articles_list.sort(key=lambda x: x.get('sentiment_score', 0), reverse=True)
+        elif sort_by == 'sentiment_asc':
+            articles_list.sort(key=lambda x: x.get('sentiment_score', 0))
+
+        return {
+            "articles": articles_list,
+            "total": total,
+            "keyword": keyword,
+            "sort_by": sort_by
+        }
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/search/entity")
@@ -459,48 +390,25 @@ def search_entity(request: dict):
         raise HTTPException(400, "Entity name is required")
 
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT a.id, a.headline, LEFT(a.content, 200) as content_preview,
-                       a.sentiment_score, a.sentiment_label, a.topic_label,
-                       n.publication_date, a.word_count,
-                       COALESCE(json_agg(json_build_object('text', e.entity_text, 'type', e.entity_type))
-                           FILTER (WHERE e.id IS NOT NULL), '[]') as entities
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                LEFT JOIN entities e ON a.id = e.article_id
-                WHERE EXISTS (
-                    SELECT 1 FROM entities e2
-                    WHERE e2.article_id = a.id
-                    AND e2.entity_text ILIKE %s
-                )
-                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
-                         a.topic_label, n.publication_date, a.word_count
-                ORDER BY n.publication_date DESC
-                LIMIT %s OFFSET %s
-            """, (f'%{entity_name}%', limit, offset))
-            articles = cur.fetchall()
+        db = get_db()
+        articles = db.search_by_entity(entity_name, limit=limit)
 
-            cur.execute("""
-                SELECT COUNT(DISTINCT a.id) as total
-                FROM articles a
-                JOIN entities e ON a.id = e.article_id
-                WHERE e.entity_text ILIKE %s
-            """, (f'%{entity_name}%',))
-            total = cur.fetchone()['total']
+        # Apply offset
+        total = len(articles)
+        articles = articles[offset:offset + limit]
 
-            # Filter entities in each article
-            articles_list = []
-            for article in articles:
-                article_dict = dict(article)
-                article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
-                articles_list.append(article_dict)
+        # Add content preview and filter entities
+        articles_list = []
+        for article in articles:
+            article['content_preview'] = article.get('content', '')[:200]
+            article['entities'] = filter_and_normalize_entities(article.get('entities', []))
+            articles_list.append(article)
 
-            return {
-                "articles": articles_list,
-                "total": total,
-                "entity_name": entity_name
-            }
+        return {
+            "articles": articles_list,
+            "total": total,
+            "entity_name": entity_name
+        }
     except psycopg2.Error as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
