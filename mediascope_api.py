@@ -321,15 +321,15 @@ def keyword_trend(request: dict):
         if end.tzinfo is None:
             end = end.replace(tzinfo=timezone.utc)
 
-        # Get all articles
-        articles = db.db.collection('articles').stream()
+        # Get all articles into a list (so we can iterate multiple times)
+        articles_stream = db.db.collection('articles').limit(1000).stream()
+        articles = [doc.to_dict() for doc in articles_stream]
 
         trends = {}
         for keyword in keywords[:5]:  # Limit to 5 keywords
             date_counts = defaultdict(int)
 
-            for doc in articles:
-                data = doc.to_dict()
+            for data in articles:
                 pub_date = data.get('publication_date')
 
                 if not pub_date:
