@@ -11,7 +11,8 @@ Download and install these (in order):
 1. **Python 3.9-3.14** → [python.org/downloads](https://www.python.org/downloads/)
 2. **Node.js 16+** → [nodejs.org](https://nodejs.org/)
 3. **Git** → [git-scm.com/downloads](https://git-scm.com/downloads)
-4. **Firebase Project** → See [Firebase Setup](#firebase-setup) below
+
+**Note:** Firebase credentials are already included in the repository - no additional setup needed!
 
 ### 2. Clone & Setup
 
@@ -85,39 +86,27 @@ MediaScope uses Firebase Firestore as its cloud database. **You need to set this
 3. Choose "Start in production mode"
 4. Select a location (choose closest to your region)
 
-### Step 3: Get Service Account Key
+### Step 3: Firebase Credentials (Already Included)
 
-1. In Firebase Console, click the gear icon ⚙️ → "Project settings"
-2. Go to "Service accounts" tab
-3. Click "Generate new private key"
-4. Save the downloaded JSON file as `firebase-service-account.json` in your project root
+**The Firebase service account credentials are already included in this repository** as `firebase-service-account.json`. This means:
 
-### Step 4: Configure Environment
+✅ **No additional setup needed** - Team members can clone and run immediately
+✅ **Shared Firebase access** - Everyone uses the same Firestore database
+✅ **Simplified deployment** - No credential management required
 
-Add this to your `.env` file:
+**Note:** The `.env` file already points to `firebase-service-account.json` by default.
 
-```bash
-# Firebase Configuration
-FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json
-```
+### How It Works
 
-**Important Security Notes:**
-- Never commit `firebase-service-account.json` to Git! It contains sensitive credentials.
-- The file is automatically ignored by `.gitignore`
-- Keep your service account key secure and never share it
+When you start the application, it automatically:
 
-### How Firebase Initialization Works
+1. **Loads** the `firebase-service-account.json` credentials from the repository
+2. **Initializes** Firebase Admin SDK (preventing duplicate initialization)
+3. **Connects** to the shared Firestore database
 
-The application initializes Firebase automatically when it starts:
+You'll see `[OK] Connected to Firebase Firestore` when the connection succeeds.
 
-1. **Checks** if Firebase is already initialized (prevents duplicate initialization)
-2. **Loads** credentials from the path specified in `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable
-3. **Falls back** to default credentials if the file doesn't exist
-4. **Connects** to Firestore database and confirms connection
-
-You'll see `[OK] Connected to Firebase Firestore` when initialization succeeds.
-
-For detailed instructions, see [FIREBASE_SETUP.md](FIREBASE_SETUP.md)
+**All team members share the same Firebase project and data!**
 
 ---
 
@@ -151,14 +140,14 @@ mediascope/
 
 ### "Firestore connection error"
 ```bash
-# Check that you have the Firebase service account key file
+# Verify the credentials file exists
 ls firebase-service-account.json
 
-# Make sure .env points to the correct file
-cat .env | grep FIREBASE
+# Check if the JSON file is valid
+python3 -c "import json; json.load(open('firebase-service-account.json'))"
 
-# Verify the JSON file is valid
-python -c "import json; json.load(open('firebase-service-account.json'))"
+# Ensure you have internet connection (Firestore is cloud-based)
+ping -c 3 firestore.googleapis.com
 ```
 
 ### "No module named 'firestore_db'"
