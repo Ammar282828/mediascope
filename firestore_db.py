@@ -518,6 +518,108 @@ class FirestoreDB:
             print(f"[ERROR] Top entities query failed: {e}")
             return []
 
+    def get_entity_cooccurrence(self, entity_type: Optional[str] = None, min_count: int = 3, limit: int = 50) -> List[Dict]:
+        """Get entity pairs that frequently appear together in articles"""
+        try:
+            from itertools import combinations
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').limit(1000).stream()
+
+            # Track entity pairs
+            pair_counts = defaultdict(int)
+
+            for doc in articles:
+                data = doc.to_dict()
+                entities = data.get('entities', [])
+
+                # Filter entities by type if specified
+                filtered_entities = []
+                for entity in entities:
+                    entity_text = entity.get('text', '')
+                    entity_type_val = entity.get('type', '')
+
+                    # Skip useless types
+                    if entity_type_val in ['DATE', 'TIME', 'CARDINAL', 'ORDINAL', 'QUANTITY', 'MONEY', 'PERCENT']:
+                        continue
+
+                    # Skip short entities
+                    if len(entity_text) < 3 or entity_text.isdigit():
+                        continue
+
+                    # Filter by type if specified
+                    if entity_type and entity_type_val != entity_type:
+                        continue
+
+                    # Normalize entity name
+                    normalized_text = self._normalize_entity_name(entity_text)
+                    filtered_entities.append({
+                        'text': normalized_text,
+                        'type': entity_type_val
+                    })
+
+                # Generate all pairs of entities in this article
+                for e1, e2 in combinations(filtered_entities, 2):
+                    # Order entities alphabetically for consistent keys
+                    if e1['text'] < e2['text']:
+                        pair = (e1['text'], e1['type'], e2['text'], e2['type'])
+                    else:
+                        pair = (e2['text'], e2['type'], e1['text'], e1['type'])
+
+                    pair_counts[pair] += 1
+
+            # Filter by min_count and convert to list
+            results = []
+            for (entity1, type1, entity2, type2), count in pair_counts.items():
+                if count >= min_count:
+                    results.append({
+                        'entity1': entity1,
+                        'type1': type1,
+                        'entity2': entity2,
+                        'type2': type2,
+                        'cooccurrence_count': count
+                    })
+
+            # Sort by count and return top pairs
+            results.sort(key=lambda x: x['cooccurrence_count'], reverse=True)
+            return results[:limit]
+
+        except Exception as e:
+            print(f"[ERROR] Entity co-occurrence analysis failed: {e}")
+            return []
+
+    def get_topic_distribution(self) -> List[Dict]:
+        """Get topic distribution across all articles"""
+        try:
+            from collections import defaultdict
+            articles = self.db.collection('articles').limit(1000).stream()
+
+            topic_counts = defaultdict(int)
+            total_articles = 0
+
+            for doc in articles:
+                data = doc.to_dict()
+                topic = data.get('topic_label', 'Uncategorized')
+                topic_counts[topic] += 1
+                total_articles += 1
+
+            # Convert to list with percentages
+            results = []
+            for topic, count in topic_counts.items():
+                results.append({
+                    'topic': topic,
+                    'count': count,
+                    'percentage': round((count / total_articles) * 100, 2) if total_articles > 0 else 0
+                })
+
+            # Sort by count
+            results.sort(key=lambda x: x['count'], reverse=True)
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Topic distribution analysis failed: {e}")
+            return []
+
     def close(self):
         """Close Firestore connection (no-op for Firestore)"""
         print("[OK] Firestore connection closed")

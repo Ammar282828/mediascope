@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime
 import base64
 import re
+import json
 from pathlib import Path
 import google.generativeai as genai
 
@@ -793,28 +794,86 @@ async def upload_ad_image(file: UploadFile = File(...), metadata: Optional[str] 
         raise HTTPException(500, f"Upload error: {str(e)}")
 
 @app.post("/api/ads/analyze")
-def analyze_ad_image(request: dict):
-    """Analyze uploaded advertisement image"""
+async def analyze_ad_image(request: dict):
+    """Analyze uploaded advertisement image using Gemini Vision API"""
     file_id = request.get('file_id')
 
     if not file_id:
         raise HTTPException(400, "file_id is required")
 
-    # Mock analysis result (integrate with your AI analysis later)
-    return {
-        "file_id": file_id,
-        "analysis": {
-            "detected_text": "Sample ad text detected",
-            "brands": ["Brand A", "Brand B"],
-            "sentiment": "positive",
-            "sentiment_score": 0.75,
-            "categories": ["consumer goods", "lifestyle"],
-            "colors": ["#FF5733", "#3498DB"],
-            "dominant_emotion": "happy",
-            "target_demographic": "adults 25-45"
-        },
-        "status": "completed"
-    }
+    # Find the uploaded file
+    upload_dir = "uploads/ads"
+    ad_files = [f for f in os.listdir(upload_dir) if f.startswith(file_id)] if os.path.exists(upload_dir) else []
+
+    if not ad_files:
+        raise HTTPException(404, "Advertisement file not found")
+
+    file_path = f"{upload_dir}/{ad_files[0]}"
+
+    try:
+        # Analyze using Gemini Vision if API key is available
+        if GEMINI_API_KEY:
+            import PIL.Image
+
+            # Load image
+            img = PIL.Image.open(file_path)
+
+            # Generate analysis prompt
+            prompt = """Analyze this advertisement image in detail. Provide a structured analysis with:
+
+1. **Text Content**: All visible text in the ad (headlines, body copy, slogans)
+2. **Brand Information**: Brand names, logos, product names mentioned
+3. **Visual Elements**: Colors, imagery, layout, design style
+4. **Target Audience**: Demographics, interests, lifestyle indicators
+5. **Advertising Strategy**: Message, tone, persuasion techniques
+6. **Product Category**: Type of product/service being advertised
+7. **Cultural Context**: Any cultural references, themes, or period indicators (1990-1992 era)
+8. **Sentiment**: Overall emotional tone (positive, neutral, negative)
+
+Provide your analysis in a clear, structured format."""
+
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content([prompt, img])
+
+            analysis_text = response.text
+
+            # Parse into structured format (simple extraction for now)
+            analysis_data = {
+                "detected_text": analysis_text,
+                "timestamp": datetime.now().isoformat(),
+                "model": "gemini-1.5-flash",
+                "file_id": file_id,
+                "file_path": file_path
+            }
+
+        else:
+            # Fallback if no API key
+            analysis_data = {
+                "detected_text": "No analysis available - Gemini API key not configured",
+                "timestamp": datetime.now().isoformat(),
+                "file_id": file_id,
+                "file_path": file_path,
+                "error": "API key not configured"
+            }
+
+        # Save analysis as JSON file
+        json_dir = "uploads/ads/analysis"
+        os.makedirs(json_dir, exist_ok=True)
+        json_path = f"{json_dir}/{file_id}.json"
+
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(analysis_data, f, indent=2, ensure_ascii=False)
+
+        return {
+            "file_id": file_id,
+            "analysis": analysis_data,
+            "json_path": json_path,
+            "status": "completed"
+        }
+
+    except Exception as e:
+        print(f"Ad analysis error: {str(e)}")
+        raise HTTPException(500, f"Analysis failed: {str(e)}")
 
 @app.get("/api/ads/list")
 def list_ads(limit: int = 50, offset: int = 0):
@@ -852,43 +911,31 @@ def sentiment_by_entity(entity_type: Optional[str] = None, limit: int = 20):
 
 @app.get("/api/analytics/entity-cooccurrence")
 def entity_cooccurrence(entity_type: Optional[str] = None, min_count: int = 3, limit: int = 50):
-    """Get entity pairs that frequently appear together in articles"""
+    """Get entity pairs that frequently appear together in articles (Firestore version)"""
     limit = min(limit, 200)
     try:
-        with get_db_cursor() as cur:
-            query = """
-                SELECT
-                    e1.entity_text as entity1,
-                    e1.entity_type as type1,
-                    e2.entity_text as entity2,
-                    e2.entity_type as type2,
-                    COUNT(DISTINCT e1.article_id) as cooccurrence_count
-                FROM entities e1
-                JOIN entities e2 ON e1.article_id = e2.article_id AND e1.entity_text < e2.entity_text
-            """
+        db = get_db()
+        pairs = db.get_entity_cooccurrence(entity_type=entity_type, min_count=min_count, limit=limit)
 
-            params = []
-            if entity_type:
-                query += " WHERE e1.entity_type = %s AND e2.entity_type = %s"
-                params = [entity_type, entity_type, min_count, limit]
-            else:
-                params = [min_count, limit]
+        return {
+            "pairs": pairs,
+            "entity_type": entity_type,
+            "min_count": min_count
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Database error: {str(e)}")
 
-            query += """
-                GROUP BY e1.entity_text, e1.entity_type, e2.entity_text, e2.entity_type
-                HAVING COUNT(DISTINCT e1.article_id) >= %s
-                ORDER BY cooccurrence_count DESC
-                LIMIT %s
-            """
+@app.get("/api/analytics/topic-distribution")
+def topic_distribution():
+    """Get topic distribution across all articles"""
+    try:
+        db = get_db()
+        topics = db.get_topic_distribution()
 
-            cur.execute(query, params)
-            results = cur.fetchall()
-
-            return {
-                "pairs": [dict(r) for r in results],
-                "entity_type": entity_type,
-                "min_count": min_count
-            }
+        return {
+            "topics": topics,
+            "total_topics": len(topics)
+        }
     except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
