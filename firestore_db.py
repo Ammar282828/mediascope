@@ -17,6 +17,11 @@ class FirestoreDB:
 
     def __init__(self):
         """Initialize Firestore connection"""
+        # Simple in-memory cache to reduce reads
+        self._cache = {}
+        self._cache_timestamp = {}
+        self._cache_ttl = 300  # 5 minutes cache
+
         # Initialize Firebase Admin SDK
         if not firebase_admin._apps:
             # Try to load from service account file
@@ -31,6 +36,22 @@ class FirestoreDB:
 
         self.db = firestore.client()
         print("[OK] Connected to Firebase Firestore")
+
+    def _get_cached(self, key: str):
+        """Get value from cache if not expired"""
+        import time
+        if key in self._cache:
+            if time.time() - self._cache_timestamp.get(key, 0) < self._cache_ttl:
+                print(f"[CACHE HIT] {key}")
+                return self._cache[key]
+        return None
+
+    def _set_cached(self, key: str, value):
+        """Store value in cache"""
+        import time
+        self._cache[key] = value
+        self._cache_timestamp[key] = time.time()
+        print(f"[CACHE SET] {key}")
 
     def store_article(self, article_data: Dict) -> str:
         """Store article in Firestore
@@ -123,7 +144,7 @@ class FirestoreDB:
                 # For now, we'll get all and filter (not ideal for large datasets)
                 all_articles = (
                     self.db.collection('articles')
-                    .limit(1000)  # Reasonable limit
+                    .limit(300)  # Reasonable limit to avoid quota issues
                     .stream()
                 )
 
@@ -157,7 +178,7 @@ class FirestoreDB:
             results = []
 
             # Get all articles and filter by entity (Firestore array queries are limited)
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').limit(300).stream()
 
             for doc in articles:
                 data = doc.to_dict()
@@ -180,9 +201,14 @@ class FirestoreDB:
 
     def get_analytics_articles_over_time(self) -> List[Dict]:
         """Get article count grouped by month"""
+        # Check cache first
+        cached = self._get_cached('articles_over_time')
+        if cached is not None:
+            return cached
+
         try:
-            # Get all articles
-            articles = self.db.collection('articles').stream()
+            # Get all articles (limit to reasonable amount to avoid quota issues)
+            articles = self.db.collection('articles').limit(100).stream()
 
             # Group by month
             monthly_counts = {}
@@ -203,6 +229,8 @@ class FirestoreDB:
                 for month, count in sorted(monthly_counts.items())
             ]
 
+            # Cache the result
+            self._set_cached('articles_over_time', result)
             return result
 
         except Exception as e:
@@ -212,7 +240,7 @@ class FirestoreDB:
     def get_analytics_sentiment_over_time(self) -> List[Dict]:
         """Get sentiment distribution over time"""
         try:
-            articles = self.db.collection('articles').stream()
+            articles = self.db.collection('articles').limit(500).stream()
 
             # Group by month and sentiment
             monthly_sentiment = {}
@@ -252,7 +280,7 @@ class FirestoreDB:
         """Get top keywords from articles"""
         try:
             # This is a simplified version - in production you'd use proper keyword extraction
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').limit(300).stream()
 
             word_freq = {}
             stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
@@ -284,7 +312,7 @@ class FirestoreDB:
     def get_sentiment_by_entity(self, entity_type: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Get sentiment statistics for entities"""
         try:
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').limit(300).stream()
 
             entity_sentiment = {}
 
@@ -303,28 +331,85 @@ class FirestoreDB:
 
                     if entity_text not in entity_sentiment:
                         entity_sentiment[entity_text] = {
-                            'entity': entity_text,
-                            'type': entity_type_val,
+                            'entity_text': entity_text,
+                            'entity_type': entity_type_val,
                             'positive_count': 0,
                             'neutral_count': 0,
                             'negative_count': 0,
-                            'total_mentions': 0
+                            'article_count': 0,
+                            'sentiment_scores': []
                         }
 
                     entity_sentiment[entity_text][f'{sentiment}_count'] += 1
-                    entity_sentiment[entity_text]['total_mentions'] += 1
+                    entity_sentiment[entity_text]['article_count'] += 1
 
-            # Sort by total mentions and return top entities
+                    # Track sentiment scores for averaging
+                    sentiment_score = data.get('sentiment_score', 0.0)
+                    entity_sentiment[entity_text]['sentiment_scores'].append(sentiment_score)
+
+            # Calculate avg_sentiment and clean up data
+            for entity_data in entity_sentiment.values():
+                scores = entity_data.pop('sentiment_scores', [])
+                entity_data['avg_sentiment'] = sum(scores) / len(scores) if scores else 0.0
+
+            # Sort by article count and return top entities
             sorted_entities = sorted(
                 entity_sentiment.values(),
-                key=lambda x: x['total_mentions'],
+                key=lambda x: x['article_count'],
+                reverse=True
+            )
+
+            # Filter entities with at least 5 mentions
+            filtered_entities = [e for e in sorted_entities if e['article_count'] >= 5]
+
+            return filtered_entities[:limit]
+
+        except Exception as e:
+            print(f"[ERROR] Entity sentiment analysis failed: {e}")
+            return []
+
+    def get_top_entities(self, entity_type: Optional[str] = None, limit: int = 15) -> List[Dict]:
+        """Get top entities by frequency"""
+        try:
+            articles = self.db.collection('articles').limit(300).stream()
+
+            entity_counts = {}
+
+            for doc in articles:
+                data = doc.to_dict()
+                entities = data.get('entities', [])
+
+                for entity in entities:
+                    entity_text = entity.get('text', '')
+                    entity_type_val = entity.get('type', '')
+
+                    # Filter by type if specified
+                    if entity_type and entity_type_val != entity_type:
+                        continue
+
+                    # Create unique key for entity
+                    entity_key = (entity_text, entity_type_val)
+
+                    if entity_key not in entity_counts:
+                        entity_counts[entity_key] = {
+                            'text': entity_text,
+                            'type': entity_type_val,
+                            'count': 0
+                        }
+
+                    entity_counts[entity_key]['count'] += 1
+
+            # Sort by count and return top entities
+            sorted_entities = sorted(
+                entity_counts.values(),
+                key=lambda x: x['count'],
                 reverse=True
             )
 
             return sorted_entities[:limit]
 
         except Exception as e:
-            print(f"[ERROR] Entity sentiment analysis failed: {e}")
+            print(f"[ERROR] Top entities query failed: {e}")
             return []
 
     def close(self):

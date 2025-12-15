@@ -268,20 +268,12 @@ def top_entities(entity_type: Optional[str] = None, limit: int = 15):
     """Get top entities with proper error handling"""
     limit = min(limit, 100)  # Cap at 100
     try:
-        with get_db_cursor() as cur:
-            if entity_type:
-                cur.execute("""
-                    SELECT entity_text as text, entity_type as type, COUNT(*) as count FROM entities
-                    WHERE entity_type = %s GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s
-                """, (entity_type, limit))
-            else:
-                cur.execute("""
-                    SELECT entity_text as text, entity_type as type, COUNT(*) as count FROM entities
-                    GROUP BY entity_text, entity_type ORDER BY count DESC LIMIT %s
-                """, (limit,))
-            entities = [dict(r) for r in cur.fetchall()]
-            return {"entities": entities}
-    except psycopg2.Error as e:
+        db = get_db()
+        entities = db.get_top_entities(entity_type=entity_type, limit=limit)
+        return {"entities": entities}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/sentiment-fixed")
@@ -298,7 +290,7 @@ def sentiment_overview():
                 data[r['sentiment_label']] = r['count']
                 data['total'] += r['count']
             return data
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/analytics/keyword-trend")
@@ -315,20 +307,79 @@ def keyword_trend(request: dict):
         raise HTTPException(400, "start_date and end_date are required")
 
     try:
-        with get_db_cursor() as cur:
-            trends = {}
-            for keyword in keywords[:5]:  # Limit to 5 keywords
-                cur.execute("""
-                    SELECT n.publication_date as date, COUNT(*) as count
-                    FROM articles a
-                    JOIN newspapers n ON a.newspaper_id = n.id
-                    JOIN entities e ON a.id = e.article_id
-                    WHERE e.entity_text ILIKE %s AND n.publication_date BETWEEN %s AND %s
-                    GROUP BY n.publication_date ORDER BY date
-                """, (f'%{keyword}%', start_date, end_date))
-                trends[keyword] = [{"date": str(r['date']), "count": r['count']} for r in cur.fetchall()]
-            return {"trends": trends}
-    except psycopg2.Error as e:
+        from datetime import datetime
+        from collections import defaultdict
+
+        db = get_db()
+
+        # Parse dates
+        from datetime import timezone
+        start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=timezone.utc)
+        end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        if end.tzinfo is None:
+            end = end.replace(tzinfo=timezone.utc)
+
+        # Get all articles
+        articles = db.db.collection('articles').stream()
+
+        trends = {}
+        for keyword in keywords[:5]:  # Limit to 5 keywords
+            date_counts = defaultdict(int)
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date = data.get('publication_date')
+
+                if not pub_date:
+                    continue
+
+                # Convert to datetime if string
+                if isinstance(pub_date, str):
+                    pub_date = datetime.fromisoformat(pub_date.replace('Z', '+00:00'))
+
+                # Ensure timezone aware
+                if pub_date.tzinfo is None:
+                    pub_date = pub_date.replace(tzinfo=timezone.utc)
+
+                # Check if in date range
+                if not (start <= pub_date <= end):
+                    continue
+
+                # Check if keyword in entities
+                entities = data.get('entities', [])
+                keyword_found = False
+
+                for entity in entities:
+                    entity_text = entity.get('text', '')
+                    if keyword.lower() in entity_text.lower():
+                        keyword_found = True
+                        break
+
+                # Also check in content and headline
+                if not keyword_found:
+                    content = data.get('content', '') + ' ' + data.get('headline', '')
+                    if keyword.lower() in content.lower():
+                        keyword_found = True
+
+                if keyword_found:
+                    date_key = pub_date.strftime('%Y-%m-%d')
+                    date_counts[date_key] += 1
+
+            # Convert to list format
+            trends[keyword] = [
+                {"date": date, "count": count}
+                for date, count in sorted(date_counts.items())
+            ]
+
+            # Reset stream for next keyword
+            articles = db.db.collection('articles').stream()
+
+        return {"trends": trends}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/search/keyword")
@@ -409,7 +460,7 @@ def search_entity(request: dict):
             "total": total,
             "entity_name": entity_name
         }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/ocr/upload")
@@ -728,7 +779,7 @@ async def upload_ad_image(file: UploadFile = File(...), metadata: Optional[str] 
                     "status": "uploaded",
                     "message": "Advertisement uploaded successfully"
                 }
-        except psycopg2.Error:
+        except Exception:
             # If table doesn't exist, return without DB insert
             return {
                 "file_id": file_id,
@@ -779,7 +830,7 @@ def list_ads(limit: int = 50, offset: int = 0):
             """, (limit, offset))
             ads = cur.fetchall()
             return {"ads": [dict(ad) for ad in ads]}
-    except psycopg2.Error:
+    except Exception:
         # If table doesn't exist, return empty list
         return {"ads": [], "message": "Ad database table not configured"}
 
@@ -788,41 +839,15 @@ def sentiment_by_entity(entity_type: Optional[str] = None, limit: int = 20):
     """Get sentiment breakdown for top entities"""
     limit = min(limit, 100)
     try:
-        with get_db_cursor() as cur:
-            query = """
-                SELECT
-                    e.entity_text,
-                    e.entity_type,
-                    COUNT(DISTINCT a.id) as article_count,
-                    AVG(a.sentiment_score) as avg_sentiment,
-                    SUM(CASE WHEN a.sentiment_label = 'positive' THEN 1 ELSE 0 END) as positive_count,
-                    SUM(CASE WHEN a.sentiment_label = 'neutral' THEN 1 ELSE 0 END) as neutral_count,
-                    SUM(CASE WHEN a.sentiment_label = 'negative' THEN 1 ELSE 0 END) as negative_count
-                FROM entities e
-                JOIN articles a ON e.article_id = a.id
-            """
-
-            if entity_type:
-                query += " WHERE e.entity_type = %s"
-                params = (entity_type, limit)
-            else:
-                params = (limit,)
-
-            query += """
-                GROUP BY e.entity_text, e.entity_type
-                HAVING COUNT(DISTINCT a.id) >= 5
-                ORDER BY article_count DESC
-                LIMIT %s
-            """
-
-            cur.execute(query, params)
-            results = cur.fetchall()
-
-            return {
-                "entities": [dict(r) for r in results],
-                "entity_type": entity_type
-            }
-    except psycopg2.Error as e:
+        db = get_db()
+        entities = db.get_sentiment_by_entity(entity_type=entity_type, limit=limit)
+        return {
+            "entities": entities,
+            "entity_type": entity_type
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/entity-cooccurrence")
@@ -864,7 +889,7 @@ def entity_cooccurrence(entity_type: Optional[str] = None, min_count: int = 3, l
                 "entity_type": entity_type,
                 "min_count": min_count
             }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/newspapers")
@@ -917,7 +942,7 @@ def search_newspapers(
                 "newspapers": [dict(n) for n in newspapers],
                 "count": len(newspapers)
             }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/newspapers/{newspaper_id}")
@@ -974,7 +999,7 @@ def get_newspaper_page(newspaper_id: str):
                 "entities": [dict(e) for e in entities],
                 "article_count": len(articles)
             }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/newspapers/{newspaper_id}/summarize")
@@ -1076,48 +1101,26 @@ def get_related_articles(article_id: str, limit: int = 10):
                 "newspaper_id": newspaper_id,
                 "count": len(articles)
             }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/articles/{article_id}/full")
 def get_article_full(article_id: str):
     """Get complete article details including newspaper image"""
     try:
-        with get_db_cursor() as cur:
-            cur.execute("""
-                SELECT
-                    a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
-                    a.topic_label, a.word_count, a.created_at,
-                    n.id as newspaper_id, n.publication_date, n.image_path,
-                    n.page_number, n.section,
-                    COALESCE(json_agg(
-                        json_build_object(
-                            'text', e.entity_text,
-                            'type', e.entity_type,
-                            'start_char', e.start_char,
-                            'end_char', e.end_char
-                        )
-                    ) FILTER (WHERE e.id IS NOT NULL), '[]') as entities
-                FROM articles a
-                LEFT JOIN newspapers n ON a.newspaper_id = n.id
-                LEFT JOIN entities e ON a.id = e.article_id
-                WHERE a.id = %s
-                GROUP BY a.id, a.headline, a.content, a.sentiment_score, a.sentiment_label,
-                         a.topic_label, a.word_count, a.created_at,
-                         n.id, n.publication_date, n.image_path, n.page_number, n.section
-            """, (article_id,))
+        db = get_db()
+        article = db.get_article(article_id)
 
-            article = cur.fetchone()
+        if not article:
+            raise HTTPException(404, "Article not found")
 
-            if not article:
-                raise HTTPException(404, "Article not found")
+        # Filter and normalize entities
+        article['entities'] = filter_and_normalize_entities(article.get('entities', []))
 
-            # Filter and normalize entities
-            article_dict = dict(article)
-            article_dict['entities'] = filter_and_normalize_entities(article_dict.get('entities', []))
-
-            return {"article": article_dict}
-    except psycopg2.Error as e:
+        return {"article": article}
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/articles/{article_id}/summary")
@@ -1170,7 +1173,7 @@ Summary:"""
                 "summary": summary,
                 "headline": article['headline']
             }
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.post("/api/analytics/ai-summary")
@@ -1287,7 +1290,7 @@ SUMMARY:"""
                 "sentiment_distribution": dict(sentiment_counts)
             }
 
-    except psycopg2.Error as e:
+    except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/")

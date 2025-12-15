@@ -19,9 +19,9 @@ elastic-transport==9.2.0
 elasticsearch==7.17.9
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl#sha256=293e9547a655b25499198ab15a525b05b9407a75f10255e405e8c3854329ab63
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
-fastapi==0.104.1
+fastapi>=0.104.1,<0.115.0
 filelock==3.20.0
-firebase-admin==6.7.0
+firebase-admin>=6.7.0,<7.0.0
 fsspec==2025.10.0
 google-ai-generativelanguage==0.6.10
 google-api-core==2.28.1
@@ -71,7 +71,7 @@ pynndescent==0.5.13
 pyparsing==3.2.5
 pytesseract==0.3.10
 python-dateutil==2.8.2
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 python-jose==3.3.0
 python-multipart==0.0.6
 pytz==2025.2
@@ -105,7 +105,7 @@ transformers==4.57.3
 typer==0.15.1
 typer-slim==0.20.0
 typing-inspection==0.4.2
-typing_extensions==4.15.0
+typing_extensions>=4.15.0
 tzdata==2025.2
 umap-learn==0.5.9.post2
 uritemplate==4.2.0

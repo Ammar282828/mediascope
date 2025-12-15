@@ -8,7 +8,7 @@ Historical newspaper archive with AI-powered search, sentiment analysis, and int
 
 Download and install these (in order):
 
-1. **Python 3.8+** → [python.org/downloads](https://www.python.org/downloads/)
+1. **Python 3.9-3.14** → [python.org/downloads](https://www.python.org/downloads/)
 2. **Node.js 16+** → [nodejs.org](https://nodejs.org/)
 3. **Git** → [git-scm.com/downloads](https://git-scm.com/downloads)
 4. **Firebase Project** → See [Firebase Setup](#firebase-setup) below
@@ -101,7 +101,21 @@ Add this to your `.env` file:
 FIREBASE_SERVICE_ACCOUNT_PATH=firebase-service-account.json
 ```
 
-**Important:** Never commit `firebase-service-account.json` to Git! It's already in `.gitignore`.
+**Important Security Notes:**
+- Never commit `firebase-service-account.json` to Git! It contains sensitive credentials.
+- The file is automatically ignored by `.gitignore`
+- Keep your service account key secure and never share it
+
+### How Firebase Initialization Works
+
+The application initializes Firebase automatically when it starts:
+
+1. **Checks** if Firebase is already initialized (prevents duplicate initialization)
+2. **Loads** credentials from the path specified in `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable
+3. **Falls back** to default credentials if the file doesn't exist
+4. **Connects** to Firestore database and confirms connection
+
+You'll see `[OK] Connected to Firebase Firestore` when initialization succeeds.
 
 For detailed instructions, see [FIREBASE_SETUP.md](FIREBASE_SETUP.md)
 
@@ -179,6 +193,20 @@ source venv/bin/activate
 venv\Scripts\activate
 
 # Then install:
+pip install -r requirements.txt
+```
+
+### Python Version Compatibility
+
+This project is compatible with Python 3.9-3.14. The requirements.txt file has been optimized for:
+- Python 3.13+ compatibility (updated dependencies)
+- Flexible version constraints for better package resolution
+- Firebase Admin SDK for cloud database access
+- Latest PyTorch and Transformers for AI features
+
+If you encounter dependency conflicts, try:
+```bash
+pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
