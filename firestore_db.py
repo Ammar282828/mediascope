@@ -335,38 +335,64 @@ class FirestoreDB:
         """Normalize entity names to combine similar variants
 
         Examples:
-            Pakistan/Pakistani/Pakistanis/Paki -> Pakistan
-            Karachi/Karachiites -> Karachi
-            America/American/Americans -> America
+            Pakistani/Pakistanis -> Pakistan
+            Indian/Indians -> India
+            American/Americans -> America
         """
         entity_lower = entity_text.lower()
 
-        # Manual mapping for common variants
+        # Manual mapping for common variants (most comprehensive)
         normalization_map = {
+            # Pakistan variants
             'pakistani': 'pakistan',
             'pakistanis': 'pakistan',
             'paki': 'pakistan',
             'pakis': 'pakistan',
+            'pakistan': 'pakistan',  # Protect base form
+
+            # India variants
             'indian': 'india',
             'indians': 'india',
+            'india': 'india',
+
+            # America variants
             'american': 'america',
             'americans': 'america',
+            'america': 'america',
+
+            # Britain variants
             'british': 'britain',
+            'britain': 'britain',
+
+            # Pakistan cities
+            'karachi': 'karachi',
             'karachiites': 'karachi',
+            'lahore': 'lahore',
             'lahori': 'lahore',
             'lahoris': 'lahore',
+            'islamabad': 'islamabad',
+
+            # Other countries
             'soviet': 'ussr',
             'soviets': 'ussr',
+            'ussr': 'ussr',
+            'russia': 'russia',
             'russian': 'russia',
             'russians': 'russia',
+            'iraq': 'iraq',
             'iraqi': 'iraq',
             'iraqis': 'iraq',
+            'iran': 'iran',
             'iranian': 'iran',
             'iranians': 'iran',
+            'israel': 'israel',
             'israeli': 'israel',
             'israelis': 'israel',
+            'china': 'china',
             'chinese': 'china',
+            'japan': 'japan',
             'japanese': 'japan',
+            'afghanistan': 'afghanistan',
             'afghan': 'afghanistan',
             'afghans': 'afghanistan',
         }
@@ -375,19 +401,23 @@ class FirestoreDB:
         if entity_lower in normalization_map:
             return normalization_map[entity_lower].title()
 
-        # Remove common suffixes to group variants
-        # e.g., "Pakistanis" -> "Pakistan", "Americans" -> "America"
-        suffixes_to_remove = ['is', 'ites', 'ese', 'ian', 'ians', 'an', 'ans']
-        for suffix in suffixes_to_remove:
-            if entity_lower.endswith(suffix) and len(entity_lower) > len(suffix) + 2:
-                # Don't remove if it makes the word too short
-                base = entity_lower[:-len(suffix)]
-                # Only apply if base is at least 3 chars and looks like a proper name
-                if len(base) >= 3:
-                    # Special handling: if ends in 'i' after removal, try removing that too
-                    if base.endswith('i') and len(base) > 3:
-                        base = base[:-1]
-                    return base.title()
+        # Conservative suffix removal - only for clear demonyms
+        # Only apply if word ends with 'an', 'ans', 'ese', 'i', 'is' after a consonant
+        if entity_lower.endswith('ans') and len(entity_lower) > 5:
+            # Americans -> America, Indians -> India
+            base = entity_lower[:-3]
+            if base not in normalization_map:  # Don't double-process
+                return base.title()
+        elif entity_lower.endswith('ese') and len(entity_lower) > 6:
+            # Chinese -> China, Japanese -> Japan (already mapped above, but fallback)
+            base = entity_lower[:-3]
+            if base.endswith('in'):
+                base = base[:-2] + 'a'  # Chin -> China
+            return base.title()
+        elif entity_lower.endswith('is') and len(entity_lower) > 5:
+            # Israelis -> Israel
+            base = entity_lower[:-2]
+            return base.title()
 
         # Return original if no normalization applies
         return entity_text

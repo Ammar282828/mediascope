@@ -58,22 +58,37 @@ export const AnalyticsSummary: React.FC = () => {
   if (!stats) return null;
 
   return (
-    <div className="analytics-summary">
-      <div className="summary-card">
-        <div className="summary-label">Total Articles</div>
-        <div className="summary-value">{stats.totalArticles.toLocaleString()}</div>
-      </div>
-      <div className="summary-card">
-        <div className="summary-label">Date Range</div>
-        <div className="summary-value small">{stats.dateRange}</div>
-      </div>
-      <div className="summary-card">
-        <div className="summary-label">Avg Sentiment</div>
-        <div className="summary-value" style={{
-          color: parseFloat(stats.avgSentiment) > 0.1 ? '#10b981' :
-                 parseFloat(stats.avgSentiment) < -0.1 ? '#ef4444' : '#6b7280'
-        }}>
-          {parseFloat(stats.avgSentiment) > 0 ? '+' : ''}{stats.avgSentiment}
+    <div className="analytics-summary-container">
+      <h2 className="summary-title">Archive Summary</h2>
+      <div className="analytics-summary">
+        <div className="summary-card">
+          <div className="summary-icon">📚</div>
+          <div className="summary-content">
+            <div className="summary-label">Total Articles</div>
+            <div className="summary-value">{stats.totalArticles.toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-icon">📅</div>
+          <div className="summary-content">
+            <div className="summary-label">Coverage Period</div>
+            <div className="summary-value small">{stats.dateRange}</div>
+          </div>
+        </div>
+        <div className="summary-card">
+          <div className="summary-icon">
+            {parseFloat(stats.avgSentiment) > 0.1 ? '😊' :
+             parseFloat(stats.avgSentiment) < -0.1 ? '😟' : '😐'}
+          </div>
+          <div className="summary-content">
+            <div className="summary-label">Overall Sentiment</div>
+            <div className="summary-value" style={{
+              color: parseFloat(stats.avgSentiment) > 0.1 ? '#10b981' :
+                     parseFloat(stats.avgSentiment) < -0.1 ? '#ef4444' : '#6b7280'
+            }}>
+              {parseFloat(stats.avgSentiment) > 0 ? '+' : ''}{stats.avgSentiment}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -337,6 +352,135 @@ export const EntityTimeline: React.FC = () => {
             {entity}
           </div>
         ))}
+      </div>
+    </div>
+  );
+};
+
+// Article Length Distribution
+export const ArticleLengthDistribution: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/articles?limit=1000`);
+        const articles = response.data.articles || [];
+
+        // Group by word count ranges
+        const ranges: any = {
+          '0-100': 0,
+          '101-300': 0,
+          '301-500': 0,
+          '501-800': 0,
+          '800+': 0
+        };
+
+        articles.forEach((article: any) => {
+          const wc = article.word_count || 0;
+          if (wc <= 100) ranges['0-100']++;
+          else if (wc <= 300) ranges['101-300']++;
+          else if (wc <= 500) ranges['301-500']++;
+          else if (wc <= 800) ranges['501-800']++;
+          else ranges['800+']++;
+        });
+
+        setData([
+          { range: '0-100', count: ranges['0-100'], label: 'Very Short' },
+          { range: '101-300', count: ranges['101-300'], label: 'Short' },
+          { range: '301-500', count: ranges['301-500'], label: 'Medium' },
+          { range: '501-800', count: ranges['501-800'], label: 'Long' },
+          { range: '800+', count: ranges['800+'], label: 'Very Long' }
+        ]);
+      } catch (error) {
+        console.error('Failed to load article lengths:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  if (loading) return <p>Loading...</p>;
+  if (data.length === 0) return <p>No data available</p>;
+
+  return (
+    <div>
+      <h3>Article Length Distribution</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Distribution of articles by word count - shows typical article length patterns
+      </p>
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={data}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="label" />
+          <YAxis />
+          <Tooltip />
+          <Bar dataKey="count" fill="#f59e0b" />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+};
+
+// Coverage Heatmap - Shows publication intensity by month
+export const CoverageHeatmap: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/analytics/articles-over-time`);
+        const timeline = response.data.timeline || [];
+
+        setData(timeline);
+      } catch (error) {
+        console.error('Failed to load coverage data:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  if (loading) return <p>Loading...</p>;
+  if (data.length === 0) return <p>No data available</p>;
+
+  const maxCount = Math.max(...data.map((d: any) => d.count));
+
+  return (
+    <div>
+      <h3>Coverage Intensity</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Heatmap showing article publication density - darker colors indicate higher coverage
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '20px' }}>
+        {data.map((item, idx) => {
+          const intensity = item.count / maxCount;
+          const bgColor = `rgba(102, 126, 234, ${intensity * 0.9 + 0.1})`;
+
+          return (
+            <div
+              key={idx}
+              style={{
+                minWidth: '80px',
+                padding: '12px',
+                background: bgColor,
+                borderRadius: '8px',
+                textAlign: 'center',
+                color: intensity > 0.5 ? 'white' : '#1f2937',
+                fontWeight: 500,
+                fontSize: '13px'
+              }}
+              title={`${item.count} articles`}
+            >
+              <div>{item.month}</div>
+              <div style={{ fontSize: '18px', marginTop: '4px' }}>{item.count}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

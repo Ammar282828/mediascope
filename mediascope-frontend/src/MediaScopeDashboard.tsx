@@ -12,7 +12,9 @@ import {
   SentimentDistribution,
   TopicDistribution,
   EntityCooccurrenceNetwork,
-  EntityTimeline
+  EntityTimeline,
+  ArticleLengthDistribution,
+  CoverageHeatmap
 } from './components/EnhancedAnalytics';
 import ImageAnalysisTab from './components/ImageAnalysisTab';
 import OCRTab from './components/OCRTab';
@@ -503,12 +505,17 @@ const MediaScopeDashboard: React.FC = () => {
                       <SentimentDistribution />
                     </div>
                     <div className="analytics-card">
-                      <TopicDistribution />
+                      <ArticleLengthDistribution />
                     </div>
                   </div>
 
-                  <div className="analytics-card full-width">
-                    <KeywordTrendChart />
+                  <div className="analytics-grid">
+                    <div className="analytics-card">
+                      <TopicDistribution />
+                    </div>
+                    <div className="analytics-card">
+                      <KeywordTrendChart />
+                    </div>
                   </div>
                 </div>
               )}
@@ -519,6 +526,10 @@ const MediaScopeDashboard: React.FC = () => {
                   <p className="analytics-section-subtitle">
                     How coverage, sentiment, and topics evolved over time
                   </p>
+
+                  <div className="analytics-card full-width">
+                    <CoverageHeatmap />
+                  </div>
 
                   <div className="analytics-grid">
                     <div className="analytics-card">
