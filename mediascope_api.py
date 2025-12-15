@@ -1304,6 +1304,99 @@ SUMMARY:"""
     except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
+@app.post("/api/topics/train")
+def train_topic_model():
+    """Train BERTopic model on existing articles in Firestore"""
+    try:
+        # Initialize pipeline if not already done
+        _init_pipeline()
+
+        if not PIPELINE_AVAILABLE:
+            raise HTTPException(503, "NLP pipeline not available")
+
+        db = get_firestore_db()
+
+        # Get all articles from Firestore
+        articles_stream = db.db.collection('articles').limit(1000).stream()
+
+        documents = []
+        article_ids = []
+
+        for doc in articles_stream:
+            data = doc.to_dict()
+            content = data.get('content', '')
+            headline = data.get('headline', '')
+
+            # Combine headline and content for topic modeling
+            combined_text = f"{headline}\n{content}"
+
+            if combined_text.strip():
+                documents.append(combined_text)
+                article_ids.append(data.get('id'))
+
+        if len(documents) < 10:
+            raise HTTPException(400, f"Not enough articles for topic modeling. Found {len(documents)}, need at least 10.")
+
+        # Train the topic model
+        print(f"Training topic model on {len(documents)} articles...")
+        pipeline.train_topic_model(documents)
+
+        # Get topic info
+        topic_info = pipeline.topic_model.get_topic_info()
+        topics = []
+
+        for _, row in topic_info.iterrows():
+            if row['Topic'] != -1:  # Skip outlier topic
+                topic_words = pipeline.topic_model.get_topic(row['Topic'])
+                topics.append({
+                    'topic_id': int(row['Topic']),
+                    'count': int(row['Count']),
+                    'keywords': [word for word, _ in topic_words[:5]],
+                    'name': row.get('Name', f"Topic {row['Topic']}")
+                })
+
+        return {
+            "status": "success",
+            "message": f"Topic model trained on {len(documents)} articles",
+            "topic_count": len(topics),
+            "topics": topics
+        }
+
+    except Exception as e:
+        print(f"Topic training error: {str(e)}")
+        raise HTTPException(500, f"Failed to train topic model: {str(e)}")
+
+@app.get("/api/topics")
+def get_topics():
+    """Get discovered topics from trained model"""
+    try:
+        _init_pipeline()
+
+        if not PIPELINE_AVAILABLE or not pipeline.topic_model:
+            raise HTTPException(400, "Topic model not trained yet. Train it first using POST /api/topics/train")
+
+        topic_info = pipeline.topic_model.get_topic_info()
+        topics = []
+
+        for _, row in topic_info.iterrows():
+            if row['Topic'] != -1:  # Skip outlier topic
+                topic_words = pipeline.topic_model.get_topic(row['Topic'])
+                topics.append({
+                    'topic_id': int(row['Topic']),
+                    'count': int(row['Count']),
+                    'keywords': [word for word, _ in topic_words[:10]],
+                    'name': row.get('Name', f"Topic {row['Topic']}")
+                })
+
+        return {
+            "topic_count": len(topics),
+            "topics": topics
+        }
+
+    except Exception as e:
+        print(f"Get topics error: {str(e)}")
+        raise HTTPException(500, f"Failed to get topics: {str(e)}")
+
 @app.get("/")
 def root():
     return {"message": "MediaScope API", "version": "2.0"}

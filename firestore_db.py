@@ -331,6 +331,67 @@ class FirestoreDB:
             print(f"[ERROR] Keyword extraction failed: {e}")
             return []
 
+    def _normalize_entity_name(self, entity_text: str) -> str:
+        """Normalize entity names to combine similar variants
+
+        Examples:
+            Pakistan/Pakistani/Pakistanis/Paki -> Pakistan
+            Karachi/Karachiites -> Karachi
+            America/American/Americans -> America
+        """
+        entity_lower = entity_text.lower()
+
+        # Manual mapping for common variants
+        normalization_map = {
+            'pakistani': 'pakistan',
+            'pakistanis': 'pakistan',
+            'paki': 'pakistan',
+            'pakis': 'pakistan',
+            'indian': 'india',
+            'indians': 'india',
+            'american': 'america',
+            'americans': 'america',
+            'british': 'britain',
+            'karachiites': 'karachi',
+            'lahori': 'lahore',
+            'lahoris': 'lahore',
+            'soviet': 'ussr',
+            'soviets': 'ussr',
+            'russian': 'russia',
+            'russians': 'russia',
+            'iraqi': 'iraq',
+            'iraqis': 'iraq',
+            'iranian': 'iran',
+            'iranians': 'iran',
+            'israeli': 'israel',
+            'israelis': 'israel',
+            'chinese': 'china',
+            'japanese': 'japan',
+            'afghan': 'afghanistan',
+            'afghans': 'afghanistan',
+        }
+
+        # Check if there's a direct mapping
+        if entity_lower in normalization_map:
+            return normalization_map[entity_lower].title()
+
+        # Remove common suffixes to group variants
+        # e.g., "Pakistanis" -> "Pakistan", "Americans" -> "America"
+        suffixes_to_remove = ['is', 'ites', 'ese', 'ian', 'ians', 'an', 'ans']
+        for suffix in suffixes_to_remove:
+            if entity_lower.endswith(suffix) and len(entity_lower) > len(suffix) + 2:
+                # Don't remove if it makes the word too short
+                base = entity_lower[:-len(suffix)]
+                # Only apply if base is at least 3 chars and looks like a proper name
+                if len(base) >= 3:
+                    # Special handling: if ends in 'i' after removal, try removing that too
+                    if base.endswith('i') and len(base) > 3:
+                        base = base[:-1]
+                    return base.title()
+
+        # Return original if no normalization applies
+        return entity_text
+
     def get_sentiment_by_entity(self, entity_type: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Get sentiment statistics for entities"""
         try:
@@ -359,9 +420,12 @@ class FirestoreDB:
                     if entity_type and entity_type_val != entity_type:
                         continue
 
-                    if entity_text not in entity_sentiment:
-                        entity_sentiment[entity_text] = {
-                            'entity_text': entity_text,
+                    # Normalize entity name to group variants
+                    normalized_text = self._normalize_entity_name(entity_text)
+
+                    if normalized_text not in entity_sentiment:
+                        entity_sentiment[normalized_text] = {
+                            'entity_text': normalized_text,
                             'entity_type': entity_type_val,
                             'positive_count': 0,
                             'neutral_count': 0,
@@ -370,12 +434,12 @@ class FirestoreDB:
                             'sentiment_scores': []
                         }
 
-                    entity_sentiment[entity_text][f'{sentiment}_count'] += 1
-                    entity_sentiment[entity_text]['article_count'] += 1
+                    entity_sentiment[normalized_text][f'{sentiment}_count'] += 1
+                    entity_sentiment[normalized_text]['article_count'] += 1
 
                     # Track sentiment scores for averaging
                     sentiment_score = data.get('sentiment_score', 0.0)
-                    entity_sentiment[entity_text]['sentiment_scores'].append(sentiment_score)
+                    entity_sentiment[normalized_text]['sentiment_scores'].append(sentiment_score)
 
             # Calculate avg_sentiment and clean up data
             for entity_data in entity_sentiment.values():
@@ -426,12 +490,15 @@ class FirestoreDB:
                     if entity_type and entity_type_val != entity_type:
                         continue
 
+                    # Normalize entity name to group variants
+                    normalized_text = self._normalize_entity_name(entity_text)
+
                     # Create unique key for entity
-                    entity_key = (entity_text, entity_type_val)
+                    entity_key = (normalized_text, entity_type_val)
 
                     if entity_key not in entity_counts:
                         entity_counts[entity_key] = {
-                            'text': entity_text,
+                            'text': normalized_text,
                             'type': entity_type_val,
                             'count': 0
                         }

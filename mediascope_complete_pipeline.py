@@ -324,9 +324,9 @@ class NLPProcessor:
         )
 
         # Load BERTopic
-        # print("Loading topic modeling...")
-        # self.embedding_model = SentenceTransformer(config.EMBEDDING_MODEL)
-        self.topic_model = None  # Skip for now  # Will be trained on full dataset
+        print("Loading topic modeling...")
+        self.embedding_model = SentenceTransformer(config.EMBEDDING_MODEL)
+        self.topic_model = None  # Will be trained on full dataset
 
         print("[OK] NLP models loaded")
     
