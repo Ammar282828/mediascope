@@ -264,6 +264,9 @@ const TopEntitiesPanel: React.FC = () => {
   return (
     <div className="top-entities-panel">
       <h3>Top Entities</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Most frequently mentioned people, organizations, and locations across all articles
+      </p>
 
       <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="entity-type-select">
         <option value="">All Types</option>

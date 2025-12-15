@@ -51,6 +51,9 @@ const SentimentByEntityChart: React.FC = () => {
     <div className="sentiment-by-entity-chart">
       <div className="chart-header">
         <h3>Sentiment by Entity</h3>
+        <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+          How people, organizations, and locations are portrayed in articles (positive, neutral, or negative sentiment)
+        </p>
         <select
           value={entityType}
           onChange={(e) => setEntityType(e.target.value)}

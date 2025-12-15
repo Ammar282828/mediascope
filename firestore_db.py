@@ -207,8 +207,8 @@ class FirestoreDB:
             return cached
 
         try:
-            # Get all articles (limit to reasonable amount to avoid quota issues)
-            articles = self.db.collection('articles').limit(100).stream()
+            # Get all articles
+            articles = self.db.collection('articles').limit(1000).stream()
 
             # Group by month
             monthly_counts = {}
@@ -240,7 +240,7 @@ class FirestoreDB:
     def get_analytics_sentiment_over_time(self) -> List[Dict]:
         """Get sentiment distribution over time"""
         try:
-            articles = self.db.collection('articles').limit(500).stream()
+            articles = self.db.collection('articles').limit(1000).stream()
 
             # Group by month and sentiment
             monthly_sentiment = {}
@@ -280,7 +280,7 @@ class FirestoreDB:
         """Get top keywords from articles"""
         try:
             # This is a simplified version - in production you'd use proper keyword extraction
-            articles = self.db.collection('articles').limit(300).stream()
+            articles = self.db.collection('articles').limit(1000).stream()
 
             word_freq = {}
             stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
@@ -312,7 +312,7 @@ class FirestoreDB:
     def get_sentiment_by_entity(self, entity_type: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Get sentiment statistics for entities"""
         try:
-            articles = self.db.collection('articles').limit(300).stream()
+            articles = self.db.collection('articles').limit(1000).stream()
 
             entity_sentiment = {}
 
@@ -359,8 +359,8 @@ class FirestoreDB:
                 reverse=True
             )
 
-            # Filter entities with at least 5 mentions
-            filtered_entities = [e for e in sorted_entities if e['article_count'] >= 5]
+            # Filter entities with at least 2 mentions to reduce noise
+            filtered_entities = [e for e in sorted_entities if e['article_count'] >= 2]
 
             return filtered_entities[:limit]
 
@@ -371,7 +371,7 @@ class FirestoreDB:
     def get_top_entities(self, entity_type: Optional[str] = None, limit: int = 15) -> List[Dict]:
         """Get top entities by frequency"""
         try:
-            articles = self.db.collection('articles').limit(300).stream()
+            articles = self.db.collection('articles').limit(1000).stream()
 
             entity_counts = {}
 
