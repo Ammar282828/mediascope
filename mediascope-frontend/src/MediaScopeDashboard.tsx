@@ -7,6 +7,13 @@ import SearchPanel from './components/SearchPanel';
 import ArticleList from './components/ArticleList';
 import SearchResultsSummary from './components/SearchResultsSummary';
 import { ArticlesOverTime, SentimentOverTime, TopKeywordsCloud } from './components/AnalyticsCharts';
+import {
+  AnalyticsSummary,
+  SentimentDistribution,
+  TopicDistribution,
+  EntityCooccurrenceNetwork,
+  EntityTimeline
+} from './components/EnhancedAnalytics';
 import ImageAnalysisTab from './components/ImageAnalysisTab';
 import OCRTab from './components/OCRTab';
 import SentimentByEntityChart from './components/SentimentByEntityChart';
@@ -371,6 +378,7 @@ const EntityCooccurrence: React.FC = () => {
 const MediaScopeDashboard: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'analytics' | 'pages' | 'image-analysis' | 'ocr'>('search');
+  const [analyticsSubTab, setAnalyticsSubTab] = useState<'overview' | 'temporal' | 'entities' | 'topics'>('overview');
   const [searchFilters, setSearchFilters] = useState<any>(null);
 
   useEffect(() => {
@@ -450,30 +458,117 @@ const MediaScopeDashboard: React.FC = () => {
 
         {activeTab === 'analytics' && (
           <div className="analytics-view">
-            <div className="analytics-card full-width">
-              <KeywordTrendChart />
+            {/* Summary Cards */}
+            <AnalyticsSummary />
+
+            {/* Sub-navigation */}
+            <div className="analytics-tab-nav">
+              <button
+                className={`analytics-tab-button ${analyticsSubTab === 'overview' ? 'active' : ''}`}
+                onClick={() => setAnalyticsSubTab('overview')}
+              >
+                📊 Overview
+              </button>
+              <button
+                className={`analytics-tab-button ${analyticsSubTab === 'temporal' ? 'active' : ''}`}
+                onClick={() => setAnalyticsSubTab('temporal')}
+              >
+                📈 Trends Over Time
+              </button>
+              <button
+                className={`analytics-tab-button ${analyticsSubTab === 'entities' ? 'active' : ''}`}
+                onClick={() => setAnalyticsSubTab('entities')}
+              >
+                🏷️ Entities & Relationships
+              </button>
+              <button
+                className={`analytics-tab-button ${analyticsSubTab === 'topics' ? 'active' : ''}`}
+                onClick={() => setAnalyticsSubTab('topics')}
+              >
+                💡 Topics & Keywords
+              </button>
             </div>
-            <div className="analytics-grid">
-              <div className="analytics-card">
-                <ArticlesOverTime />
-              </div>
-              <div className="analytics-card">
-                <SentimentOverTime />
-              </div>
-            </div>
-            <div className="analytics-grid">
-              <div className="analytics-card">
-                <TopEntitiesPanel />
-              </div>
-              <div className="analytics-card">
-                <TopKeywordsCloud />
-              </div>
-            </div>
-            <div className="analytics-card full-width">
-              <SentimentByEntityChart />
-            </div>
-            <div className="analytics-card full-width">
-              <EntityCooccurrence />
+
+            {/* Content for each sub-tab */}
+            <div className="analytics-tab-content">
+              {analyticsSubTab === 'overview' && (
+                <div className="analytics-section">
+                  <h2 className="analytics-section-title">Archive Overview</h2>
+                  <p className="analytics-section-subtitle">
+                    High-level statistics and sentiment breakdown of the entire newspaper archive
+                  </p>
+
+                  <div className="analytics-grid">
+                    <div className="analytics-card">
+                      <SentimentDistribution />
+                    </div>
+                    <div className="analytics-card">
+                      <TopicDistribution />
+                    </div>
+                  </div>
+
+                  <div className="analytics-card full-width">
+                    <KeywordTrendChart />
+                  </div>
+                </div>
+              )}
+
+              {analyticsSubTab === 'temporal' && (
+                <div className="analytics-section">
+                  <h2 className="analytics-section-title">Temporal Analysis</h2>
+                  <p className="analytics-section-subtitle">
+                    How coverage, sentiment, and topics evolved over time
+                  </p>
+
+                  <div className="analytics-grid">
+                    <div className="analytics-card">
+                      <ArticlesOverTime />
+                    </div>
+                    <div className="analytics-card">
+                      <SentimentOverTime />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {analyticsSubTab === 'entities' && (
+                <div className="analytics-section">
+                  <h2 className="analytics-section-title">Entity Analysis</h2>
+                  <p className="analytics-section-subtitle">
+                    People, organizations, and locations mentioned in the archive
+                  </p>
+
+                  <div className="analytics-card full-width">
+                    <EntityTimeline />
+                  </div>
+
+                  <div className="analytics-card full-width">
+                    <SentimentByEntityChart />
+                  </div>
+
+                  <div className="analytics-card full-width">
+                    <EntityCooccurrenceNetwork />
+                  </div>
+                </div>
+              )}
+
+              {analyticsSubTab === 'topics' && (
+                <div className="analytics-section">
+                  <h2 className="analytics-section-title">Topics & Keywords</h2>
+                  <p className="analytics-section-subtitle">
+                    Main themes, topics, and frequently mentioned terms
+                  </p>
+
+                  <div className="analytics-grid">
+                    <div className="analytics-card">
+                      <TopEntitiesPanel />
+                    </div>
+                    <div className="analytics-card">
+                      <TopKeywordsCloud />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
