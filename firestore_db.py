@@ -111,53 +111,53 @@ class FirestoreDB:
             return None
 
     def search_articles(self, query: str, limit: int = 50) -> List[Dict]:
-        """Search articles by keyword
+        """Search articles by keyword with relevance ranking
 
         Args:
             query: Search query string
             limit: Maximum number of results
 
         Returns:
-            List of matching articles
+            List of matching articles sorted by relevance (mention count, then timestamp)
         """
         try:
-            # Firestore doesn't have full-text search, so we'll do a simple match
-            # In production, you'd use Firebase Extensions for search or Algolia
+            # Get all articles and search in them
+            all_articles = self.db.collection('articles').limit(1000).stream()
 
-            results = []
+            results_with_score = []
+            query_lower = query.lower()
 
-            # Search in headlines
-            headline_results = (
-                self.db.collection('articles')
-                .where(filter=FieldFilter('headline', '>=', query))
-                .where(filter=FieldFilter('headline', '<=', query + '\uf8ff'))
-                .limit(limit)
-                .stream()
-            )
-
-            for doc in headline_results:
+            for doc in all_articles:
                 data = doc.to_dict()
-                results.append(data)
+                headline = data.get('headline', '').lower()
+                content = data.get('content', '').lower()
+                combined_text = headline + ' ' + content
 
-            # If not enough results, also search content (case-insensitive is limited in Firestore)
-            if len(results) < limit:
-                # For now, we'll get all and filter (not ideal for large datasets)
-                all_articles = (
-                    self.db.collection('articles')
-                    .limit(300)  # Reasonable limit to avoid quota issues
-                    .stream()
-                )
+                # Check if query appears in the article
+                if query_lower in combined_text:
+                    # Count mentions (more mentions = more relevant)
+                    mention_count = combined_text.count(query_lower)
 
-                for doc in all_articles:
-                    data = doc.to_dict()
-                    # Simple case-insensitive search in content
-                    if query.lower() in data.get('content', '').lower() or query.lower() in data.get('headline', '').lower():
-                        if data not in results:
-                            results.append(data)
-                        if len(results) >= limit:
-                            break
+                    # Get created_at timestamp for secondary sorting
+                    created_at = data.get('created_at')
+                    if created_at:
+                        timestamp = created_at.timestamp() if hasattr(created_at, 'timestamp') else 0
+                    else:
+                        timestamp = 0
 
-            return results[:limit]
+                    results_with_score.append({
+                        'data': data,
+                        'mentions': mention_count,
+                        'timestamp': timestamp
+                    })
+
+            # Sort by mention count (descending), then by timestamp (descending for newest first)
+            results_with_score.sort(key=lambda x: (x['mentions'], x['timestamp']), reverse=True)
+
+            # Extract just the article data
+            results = [item['data'] for item in results_with_score[:limit]]
+
+            return results
 
         except Exception as e:
             print(f"[ERROR] Search failed: {e}")
@@ -279,11 +279,25 @@ class FirestoreDB:
     def get_top_keywords(self, limit: int = 50) -> List[Dict]:
         """Get top keywords from articles"""
         try:
+            import re
             # This is a simplified version - in production you'd use proper keyword extraction
             articles = self.db.collection('articles').limit(1000).stream()
 
             word_freq = {}
-            stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+            # Comprehensive stop words list
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+                'this', 'that', 'these', 'those', 'is', 'was', 'are', 'were', 'been', 'be', 'have', 'has',
+                'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could', 'may', 'might', 'must',
+                'can', 'from', 'as', 'it', 'its', 'their', 'them', 'they', 'he', 'she', 'him', 'her',
+                'his', 'we', 'our', 'us', 'you', 'your', 'which', 'who', 'whom', 'whose', 'what', 'when',
+                'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more', 'most', 'other',
+                'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very',
+                'also', 'just', 'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+                'between', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'up', 'down',
+                'out', 'over', 'off', 'any', 'being', 'having', 'doing', 'one', 'two', 'three', 'four',
+                'five', 'six', 'seven', 'eight', 'nine', 'ten', 'said', 'page', 'continued', 'back'
+            }
 
             for doc in articles:
                 data = doc.to_dict()
@@ -293,7 +307,15 @@ class FirestoreDB:
                 for word in words:
                     # Clean word
                     word = word.strip('.,!?;:"\'()[]{}')
-                    if len(word) > 3 and word not in stop_words:
+
+                    # Filter out: short words, stop words, numbers, dates, mixed alphanumeric
+                    if (len(word) > 3 and
+                        word not in stop_words and
+                        not word.isdigit() and  # Pure numbers
+                        not re.match(r'^\d+[a-z]+$', word) and  # Like "1st", "2nd"
+                        not re.match(r'^[a-z]+\d+$', word) and  # Like "march11"
+                        not re.match(r'^\d{1,2}[-/]\d{1,2}', word) and  # Dates like "11/03"
+                        re.search(r'[a-z]', word)):  # Must contain at least one letter
                         word_freq[word] = word_freq.get(word, 0) + 1
 
             # Sort and return top keywords
@@ -324,6 +346,14 @@ class FirestoreDB:
                 for entity in entities:
                     entity_text = entity.get('text', '')
                     entity_type_val = entity.get('type', '')
+
+                    # Skip DATE, TIME, CARDINAL, ORDINAL types (not useful for research)
+                    if entity_type_val in ['DATE', 'TIME', 'CARDINAL', 'ORDINAL', 'QUANTITY', 'MONEY', 'PERCENT']:
+                        continue
+
+                    # Skip pure numbers and short entities
+                    if len(entity_text) < 3 or entity_text.isdigit():
+                        continue
 
                     # Filter by type if specified
                     if entity_type and entity_type_val != entity_type:
@@ -371,6 +401,7 @@ class FirestoreDB:
     def get_top_entities(self, entity_type: Optional[str] = None, limit: int = 15) -> List[Dict]:
         """Get top entities by frequency"""
         try:
+            import re
             articles = self.db.collection('articles').limit(1000).stream()
 
             entity_counts = {}
@@ -382,6 +413,14 @@ class FirestoreDB:
                 for entity in entities:
                     entity_text = entity.get('text', '')
                     entity_type_val = entity.get('type', '')
+
+                    # Skip DATE, TIME, CARDINAL, ORDINAL types (not useful for research)
+                    if entity_type_val in ['DATE', 'TIME', 'CARDINAL', 'ORDINAL', 'QUANTITY', 'MONEY', 'PERCENT']:
+                        continue
+
+                    # Skip pure numbers and short entities
+                    if len(entity_text) < 3 or entity_text.isdigit():
+                        continue
 
                     # Filter by type if specified
                     if entity_type and entity_type_val != entity_type:

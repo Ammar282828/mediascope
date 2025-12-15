@@ -899,106 +899,117 @@ def search_newspapers(
     page_number: Optional[int] = None,
     limit: int = 50
 ):
-    """Search newspapers by date and page number"""
+    """Search newspapers by date and page number (Firestore version)"""
     limit = min(limit, 200)
     try:
-        with get_db_cursor() as cur:
-            query = """
-                SELECT
-                    n.id,
-                    n.publication_date,
-                    n.page_number,
-                    n.section,
-                    n.image_path,
-                    COUNT(a.id) as article_count,
-                    AVG(a.sentiment_score) as avg_sentiment
-                FROM newspapers n
-                LEFT JOIN articles a ON n.id = a.newspaper_id
-                WHERE 1=1
-            """
-            params = []
+        from datetime import datetime as dt
+        from collections import defaultdict
 
+        db = get_db()
+        articles = db.db.collection('articles').limit(1000).stream()
+
+        # Group articles by (publication_date, page_number)
+        newspapers_dict = defaultdict(lambda: {
+            'articles': [],
+            'sentiment_scores': []
+        })
+
+        for doc in articles:
+            data = doc.to_dict()
+            pub_date = data.get('publication_date')
+            page_num = data.get('page_number', 1)
+
+            if not pub_date:
+                continue
+
+            # Convert to datetime if needed
+            if isinstance(pub_date, str):
+                pub_date = dt.fromisoformat(pub_date.replace('Z', '+00:00'))
+
+            # Filter by date range
             if start_date:
-                query += " AND n.publication_date >= %s"
-                params.append(start_date)
+                start_dt = dt.fromisoformat(start_date)
+                if pub_date < start_dt:
+                    continue
             if end_date:
-                query += " AND n.publication_date <= %s"
-                params.append(end_date)
-            if page_number is not None:
-                query += " AND n.page_number = %s"
-                params.append(page_number)
+                end_dt = dt.fromisoformat(end_date)
+                if pub_date > end_dt:
+                    continue
 
-            query += """
-                GROUP BY n.id, n.publication_date, n.page_number, n.section, n.image_path
-                ORDER BY n.publication_date DESC, n.page_number ASC
-                LIMIT %s
-            """
-            params.append(limit)
+            # Filter by page number
+            if page_number is not None and page_num != page_number:
+                continue
 
-            cur.execute(query, params)
-            newspapers = cur.fetchall()
+            # Group by (date, page) - use newspaper_id if available, otherwise create key
+            newspaper_id = data.get('newspaper_id', f"{pub_date.strftime('%Y-%m-%d')}_p{page_num}")
+            key = (pub_date.strftime('%Y-%m-%d'), page_num, newspaper_id)
 
-            return {
-                "newspapers": [dict(n) for n in newspapers],
-                "count": len(newspapers)
-            }
+            newspapers_dict[key]['articles'].append(data)
+            if data.get('sentiment_score') is not None:
+                newspapers_dict[key]['sentiment_scores'].append(data.get('sentiment_score'))
+
+        # Convert to list format
+        newspapers = []
+        for (date_str, page_num, newspaper_id), info in newspapers_dict.items():
+            avg_sentiment = (
+                sum(info['sentiment_scores']) / len(info['sentiment_scores'])
+                if info['sentiment_scores'] else 0
+            )
+            newspapers.append({
+                'id': newspaper_id,
+                'publication_date': date_str,
+                'page_number': page_num,
+                'section': 'Main',
+                'article_count': len(info['articles']),
+                'avg_sentiment': round(avg_sentiment, 3)
+            })
+
+        # Sort by date (desc) and page (asc)
+        newspapers.sort(key=lambda x: (x['publication_date'], x['page_number']), reverse=True)
+
+        return {
+            "newspapers": newspapers[:limit],
+            "count": len(newspapers)
+        }
     except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/newspapers/{newspaper_id}")
 def get_newspaper_page(newspaper_id: str):
-    """Get newspaper page with all its articles"""
+    """Get newspaper page with all its articles (Firestore version)"""
     try:
-        with get_db_cursor() as cur:
-            # Get newspaper info
-            cur.execute("""
-                SELECT id, publication_date, page_number, section, image_path
-                FROM newspapers
-                WHERE id = %s
-            """, (newspaper_id,))
+        db = get_db()
+        articles_stream = db.db.collection('articles').where('newspaper_id', '==', newspaper_id).stream()
 
-            newspaper = cur.fetchone()
-            if not newspaper:
-                raise HTTPException(404, "Newspaper page not found")
+        articles = []
+        newspaper_info = None
 
-            # Get all articles from this page
-            cur.execute("""
-                SELECT
-                    a.id,
-                    a.article_number,
-                    a.headline,
-                    a.content,
-                    a.word_count,
-                    a.sentiment_score,
-                    a.sentiment_label,
-                    a.topic_label
-                FROM articles a
-                WHERE a.newspaper_id = %s
-                ORDER BY a.article_number
-            """, (newspaper_id,))
+        for doc in articles_stream:
+            data = doc.to_dict()
+            articles.append(data)
 
-            articles = cur.fetchall()
+            # Extract newspaper info from first article
+            if not newspaper_info:
+                newspaper_info = {
+                    'id': newspaper_id,
+                    'publication_date': data.get('publication_date'),
+                    'page_number': data.get('page_number', 1),
+                    'section': 'Main'
+                }
 
-            # Get entities for all articles
-            cur.execute("""
-                SELECT
-                    e.article_id,
-                    e.entity_text,
-                    e.entity_type
-                FROM entities e
-                WHERE e.article_id IN (
-                    SELECT id FROM articles WHERE newspaper_id = %s
-                )
-            """, (newspaper_id,))
+        if not newspaper_info:
+            raise HTTPException(404, "Newspaper page not found")
 
-            entities = cur.fetchall()
+        # Sort articles by article number if available
+        articles.sort(key=lambda x: x.get('article_number', 0))
 
-            return {
-                "newspaper": dict(newspaper),
-                "articles": [dict(a) for a in articles],
-                "entities": [dict(e) for e in entities],
-                "article_count": len(articles)
-            }
+        return {
+            "newspaper": newspaper_info,
+            "articles": articles,
+            "article_count": len(articles)
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
