@@ -41,8 +41,6 @@ backup.sql
 # Firebase
 .firebase/
 .firebaserc
-firebase-service-account.json
-*-firebase-adminsdk-*.json
 
 # IDE
 .vscode/
