@@ -59,3 +59,4 @@ ad_uploads/
 *.backup
 *.backup[0-9]
 *.backup[0-9][0-9]
+firebase-service-account.json
