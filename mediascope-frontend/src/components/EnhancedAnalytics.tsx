@@ -58,36 +58,47 @@ export const AnalyticsSummary: React.FC = () => {
   if (!stats) return null;
 
   return (
-    <div className="analytics-summary-container">
-      <h2 className="summary-title">Archive Summary</h2>
-      <div className="analytics-summary">
-        <div className="summary-card">
-          <div className="summary-icon">📚</div>
-          <div className="summary-content">
-            <div className="summary-label">Total Articles</div>
-            <div className="summary-value">{stats.totalArticles.toLocaleString()}</div>
+    <div style={{
+      display: 'flex',
+      gap: '1rem',
+      padding: '0.75rem',
+      background: '#f9fafb',
+      borderRadius: '8px',
+      marginBottom: '1rem',
+      fontSize: '14px'
+    }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ fontSize: '20px' }}>📚</span>
+        <div>
+          <div style={{ fontSize: '11px', color: '#6b7280' }}>Total Articles</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#374151' }}>
+            {stats.totalArticles.toLocaleString()}
           </div>
         </div>
-        <div className="summary-card">
-          <div className="summary-icon">📅</div>
-          <div className="summary-content">
-            <div className="summary-label">Coverage Period</div>
-            <div className="summary-value small">{stats.dateRange}</div>
+      </div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ fontSize: '20px' }}>📅</span>
+        <div>
+          <div style={{ fontSize: '11px', color: '#6b7280' }}>Coverage Period</div>
+          <div style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}>
+            {stats.dateRange}
           </div>
         </div>
-        <div className="summary-card">
-          <div className="summary-icon">
-            {parseFloat(stats.avgSentiment) > 0.1 ? '😊' :
-             parseFloat(stats.avgSentiment) < -0.1 ? '😟' : '😐'}
-          </div>
-          <div className="summary-content">
-            <div className="summary-label">Overall Sentiment</div>
-            <div className="summary-value" style={{
-              color: parseFloat(stats.avgSentiment) > 0.1 ? '#10b981' :
+      </div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <span style={{ fontSize: '20px' }}>
+          {parseFloat(stats.avgSentiment) > 0.1 ? '😊' :
+           parseFloat(stats.avgSentiment) < -0.1 ? '😟' : '😐'}
+        </span>
+        <div>
+          <div style={{ fontSize: '11px', color: '#6b7280' }}>Overall Sentiment</div>
+          <div style={{
+            fontSize: '18px',
+            fontWeight: '700',
+            color: parseFloat(stats.avgSentiment) > 0.1 ? '#10b981' :
                      parseFloat(stats.avgSentiment) < -0.1 ? '#ef4444' : '#6b7280'
-            }}>
-              {parseFloat(stats.avgSentiment) > 0 ? '+' : ''}{stats.avgSentiment}
-            </div>
+          }}>
+            {parseFloat(stats.avgSentiment) > 0 ? '+' : ''}{stats.avgSentiment}
           </div>
         </div>
       </div>
@@ -146,7 +157,7 @@ export const SentimentDistribution: React.FC = () => {
             cx="50%"
             cy="50%"
             labelLine={false}
-            label={(entry) => `${entry.name}: ${entry.percentage}%`}
+            label={(entry: any) => `${entry.name}: ${(entry.percent * 100).toFixed(1)}%`}
             outerRadius={100}
             fill="#8884d8"
             dataKey="value"
@@ -166,14 +177,22 @@ export const SentimentDistribution: React.FC = () => {
 export const TopicDistribution: React.FC = () => {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const response = await axios.get(`${API_BASE}/analytics/topic-distribution`);
-        setData(response.data.topics || []);
+        const response = await axios.get(`${API_BASE}/topics`);
+        const topics = response.data.topics || [];
+
+        // Filter out generic topics and sort by count
+        const meaningfulTopics = topics
+          .filter((topic: any) => topic.count >= 30)  // Only show substantial topics
+          .sort((a: any, b: any) => b.count - a.count);
+
+        setData(meaningfulTopics);
       } catch (error) {
-        console.error('Failed to load topic distribution:', error);
+        console.error('Failed to load topics:', error);
       } finally {
         setLoading(false);
       }
@@ -181,30 +200,132 @@ export const TopicDistribution: React.FC = () => {
     loadData();
   }, []);
 
-  if (loading) return <p>Loading...</p>;
-  if (data.length === 0) return <p>No topics available. Train topic model first.</p>;
+  if (loading) return <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading topics...</p>;
+  if (data.length === 0) return (
+    <div style={{ margin: '1rem 0', padding: '1rem', background: '#fef3c7', borderRadius: '6px', fontSize: '13px' }}>
+      <strong>No topics found.</strong> Train the topic model first by clicking the "Train Topics" button, or topics may need more articles (minimum 30 per topic).
+    </div>
+  );
 
   return (
     <div>
-      <h3>Topic Distribution</h3>
-      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
-        Main themes and topics discovered across all articles
-      </p>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={data.slice(0, 10)}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis
-            dataKey="topic"
-            angle={-45}
-            textAnchor="end"
-            height={100}
-            interval={0}
-          />
-          <YAxis />
-          <Tooltip />
-          <Bar dataKey="count" fill="#8b5cf6" />
-        </BarChart>
-      </ResponsiveContainer>
+      <h3 style={{ marginBottom: '0.75rem' }}>Discovered Topics ({data.length})</h3>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {data.map((topic, idx) => {
+          const isExpanded = expandedTopic === topic.topic_id;
+          const topicColor = `hsl(${(idx * 137.5) % 360}, 65%, 50%)`;
+
+          return (
+            <div key={topic.topic_id} style={{
+              border: `2px solid ${isExpanded ? topicColor : '#e5e7eb'}`,
+              borderRadius: '8px',
+              background: 'white',
+              transition: 'all 0.2s',
+              overflow: 'hidden'
+            }}>
+              {/* Topic Header */}
+              <div
+                onClick={() => setExpandedTopic(isExpanded ? null : topic.topic_id)}
+                style={{
+                  padding: '12px',
+                  cursor: 'pointer',
+                  background: isExpanded ? `${topicColor}15` : 'white'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isExpanded) e.currentTarget.style.background = '#f9fafb';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isExpanded) e.currentTarget.style.background = 'white';
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '16px' }}>{isExpanded ? '▼' : '▶'}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                      <span style={{
+                        background: topicColor,
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        flexShrink: 0
+                      }}></span>
+                      <span style={{ fontWeight: '700', color: '#1f2937', fontSize: '14px' }}>
+                        {topic.name}
+                      </span>
+                      <span style={{
+                        background: topicColor,
+                        color: 'white',
+                        padding: '2px 10px',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        fontWeight: '600'
+                      }}>
+                        {topic.count} articles
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                      {topic.keywords.slice(0, 8).join(' • ')}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded Details */}
+              {isExpanded && (
+                <div style={{ padding: '12px', borderTop: '1px solid #e5e7eb', background: '#fafafa' }}>
+                  {/* Keyword Scores */}
+                  <div style={{ marginBottom: '12px' }}>
+                    <h4 style={{ fontSize: '13px', fontWeight: '600', marginBottom: '8px', color: '#374151' }}>
+                      Top Keywords (with relevance scores)
+                    </h4>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                      {topic.keyword_scores?.map(([word, score]: [string, number], kidx: number) => (
+                        <div key={kidx} style={{
+                          padding: '4px 10px',
+                          background: 'white',
+                          border: '1px solid #e5e7eb',
+                          borderRadius: '6px',
+                          fontSize: '12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px'
+                        }}>
+                          <span style={{ fontWeight: '600', color: '#374151' }}>{word}</span>
+                          <span style={{ fontSize: '11px', color: '#9ca3af' }}>({score})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Representative Documents */}
+                  {topic.representative_docs && topic.representative_docs.length > 0 && (
+                    <div>
+                      <h4 style={{ fontSize: '13px', fontWeight: '600', marginBottom: '8px', color: '#374151' }}>
+                        Sample Articles
+                      </h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {topic.representative_docs.map((doc: any, didx: number) => (
+                          <div key={didx} style={{
+                            padding: '8px 10px',
+                            background: 'white',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                            color: '#374151'
+                          }}>
+                            <span style={{ color: '#9ca3af', marginRight: '8px' }}>{didx + 1}.</span>
+                            {doc.headline}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -267,33 +388,35 @@ export const EntityCooccurrenceNetwork: React.FC = () => {
       {loading ? (
         <p>Loading relationships...</p>
       ) : cooccurrences.length > 0 ? (
-        <div className="cooccurrence-grid">
-          {cooccurrences.map((pair, idx) => (
-            <div key={idx} className="cooccurrence-card">
-              <div className="cooccurrence-header">
-                <span className="rank-badge">#{idx + 1}</span>
-                <span className="count-badge">
-                  {pair.cooccurrence_count} {pair.cooccurrence_count === 1 ? 'article' : 'articles'}
-                </span>
-              </div>
-              <div className="entity-pair">
-                <div className="entity-box">
-                  <div className="entity-name">{pair.entity1}</div>
-                  <div className="entity-type">{pair.type1}</div>
-                </div>
-                <div className="connection-line">
-                  <svg width="40" height="4" viewBox="0 0 40 4">
-                    <line x1="0" y1="2" x2="40" y2="2" stroke="#9ca3af" strokeWidth="2"/>
-                    <circle cx="20" cy="2" r="3" fill="#6366f1"/>
-                  </svg>
-                </div>
-                <div className="entity-box">
-                  <div className="entity-name">{pair.entity2}</div>
-                  <div className="entity-type">{pair.type2}</div>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="cooccurrence-table-container">
+          <table className="cooccurrence-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Entity 1</th>
+                <th>Type</th>
+                <th></th>
+                <th>Entity 2</th>
+                <th>Type</th>
+                <th>Appears Together</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cooccurrences.map((pair, idx) => (
+                <tr key={idx}>
+                  <td className="rank-cell">{idx + 1}</td>
+                  <td className="entity-cell"><strong>{pair.entity1}</strong></td>
+                  <td className="type-cell"><span className="type-badge">{pair.type1}</span></td>
+                  <td className="arrow-cell">↔</td>
+                  <td className="entity-cell"><strong>{pair.entity2}</strong></td>
+                  <td className="type-cell"><span className="type-badge">{pair.type2}</span></td>
+                  <td className="count-cell">
+                    <span className="count-value">{pair.cooccurrence_count}</span> articles
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       ) : (
         <p>No entity relationships found. Try a different filter or add more articles.</p>
@@ -365,7 +488,7 @@ export const ArticleLengthDistribution: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const response = await axios.get(`${API_BASE}/articles?limit=1000`);
+        const response = await axios.get(`${API_BASE}/articles`);
         const articles = response.data.articles || [];
 
         // Group by word count ranges

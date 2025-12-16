@@ -1,263 +1,53 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from 'recharts';
 import SearchPanel from './components/SearchPanel';
 import ArticleList from './components/ArticleList';
 import SearchResultsSummary from './components/SearchResultsSummary';
-import { ArticlesOverTime, SentimentOverTime, TopKeywordsCloud } from './components/AnalyticsCharts';
 import {
   AnalyticsSummary,
   SentimentDistribution,
   TopicDistribution,
-  EntityCooccurrenceNetwork,
-  EntityTimeline,
-  ArticleLengthDistribution,
-  CoverageHeatmap
+  EntityCooccurrenceNetwork
 } from './components/EnhancedAnalytics';
+import {
+  KeywordFrequencyOverTime,
+  EntityMentionsOverTime
+} from './components/AdvancedAnalytics';
 import ImageAnalysisTab from './components/ImageAnalysisTab';
 import OCRTab from './components/OCRTab';
-import SentimentByEntityChart from './components/SentimentByEntityChart';
 import NewspaperBrowser from './components/NewspaperBrowser';
 import { API_BASE } from './config';
 
-interface TrendData {
-  date: string;
-  count: number;
-}
-
 const api = {
-  getKeywordTrend: async (keywords: string[], startDate: string, endDate: string) => {
-    const response = await axios.post(`${API_BASE}/analytics/keyword-trend`, {
-      keywords,
-      start_date: startDate,
-      end_date: endDate,
-      granularity: 'day'
-    });
-    return response.data;
-  },
-  
-  getTopEntities: async (type?: string, limit = 10) => {
+  getTopEntities: async (type?: string, limit = 10, startDate?: string, endDate?: string) => {
     const response = await axios.get(`${API_BASE}/analytics/top-entities-fixed`, {
-      params: { entity_type: type, limit }
+      params: {
+        entity_type: type,
+        limit,
+        start_date: startDate,
+        end_date: endDate
+      }
     });
     return response.data;
   },
-  
+
   getSentimentOverview: async () => {
     const response = await axios.get(`${API_BASE}/analytics/sentiment-fixed`);
     return response.data;
-  },
-  
-  generateAISummary: async (startDate: string, endDate: string, topic?: string) => {
-    const response = await axios.post(`${API_BASE}/analytics/ai-summary`, {
-      start_date: startDate,
-      end_date: endDate,
-      topic
-    });
-    return response.data;
   }
-};
-
-const KeywordTrendChart: React.FC = () => {
-  const [keywords, setKeywords] = useState<string[]>(['karachi']);
-  const [newKeyword, setNewKeyword] = useState('');
-  const [trendData, setTrendData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const loadTrend = async () => {
-    if (keywords.length === 0) return;
-
-    setLoading(true);
-    try {
-      const data = await api.getKeywordTrend(keywords, '1990-01-01', '1992-12-31');
-      
-      const dates = new Set<string>();
-      if (data.trends) {
-        Object.values(data.trends).forEach((trend: any) => {
-          if (Array.isArray(trend)) {
-            trend.forEach((point: TrendData) => dates.add(point.date));
-          }
-        });
-      }
-
-      const chartData = Array.from(dates).sort().map(date => {
-        const point: any = { date: new Date(date).toLocaleDateString() };
-        keywords.forEach(kw => {
-          const trend = data.trends?.[kw] || [];
-          const match = Array.isArray(trend) ? trend.find((p: TrendData) => p.date === date) : null;
-          point[kw] = match ? match.count : 0;
-        });
-        return point;
-      });
-
-      setTrendData(chartData);
-    } catch (error) {
-      console.error('Error loading trends:', error);
-      setTrendData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadTrend();
-  }, [keywords]);
-
-  const addKeyword = () => {
-    if (newKeyword && !keywords.includes(newKeyword.toLowerCase())) {
-      setKeywords([...keywords, newKeyword.toLowerCase()]);
-      setNewKeyword('');
-    }
-  };
-
-  const removeKeyword = (kw: string) => {
-    if (keywords.length > 1) {
-      setKeywords(keywords.filter(k => k !== kw));
-    }
-  };
-
-  const colors = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
-
-  return (
-    <div className="trend-chart-panel">
-      <h2>Keyword Trends Over Time</h2>
-      
-      <div className="keyword-input-group">
-        <input
-          type="text"
-          placeholder="Add keyword to track..."
-          value={newKeyword}
-          onChange={(e) => setNewKeyword(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && addKeyword()}
-        />
-        <button onClick={addKeyword} className="add-button">+ Add Keyword</button>
-      </div>
-
-      <div className="active-keywords">
-        {keywords.map((kw, idx) => (
-          <span key={kw} className="keyword-badge" style={{ backgroundColor: colors[idx % colors.length] }}>
-            {kw}
-            {keywords.length > 1 && <button onClick={() => removeKeyword(kw)}>×</button>}
-          </span>
-        ))}
-      </div>
-
-      {loading ? (
-        <p>Loading trends...</p>
-      ) : trendData.length > 0 ? (
-        <ResponsiveContainer width="100%" height={400}>
-          <LineChart data={trendData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="date" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            {keywords.map((kw, idx) => (
-              <Line
-                key={kw}
-                type="monotone"
-                dataKey={kw}
-                stroke={colors[idx % colors.length]}
-                strokeWidth={2}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      ) : (
-        <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>
-          No trend data available
-        </div>
-      )}
-    </div>
-  );
-};
-
-const AISummaryPanel: React.FC = () => {
-  const [startDate, setStartDate] = useState('1990-01-01');
-  const [endDate, setEndDate] = useState('1992-12-31');
-  const [topic, setTopic] = useState('');
-  const [summary, setSummary] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-
-  const generateSummary = async () => {
-    setLoading(true);
-    setSummary(null);
-
-    try {
-      const data = await api.generateAISummary(startDate, endDate, topic || undefined);
-      setSummary(data);
-    } catch (error) {
-      console.error('Failed to generate summary:', error);
-      setSummary({ error: 'Failed to generate summary.' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="ai-summary-panel">
-      <h2>AI-Powered Summary</h2>
-
-      <div className="summary-controls">
-        <div className="date-inputs">
-          <label>
-            Start Date:
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-          </label>
-          <label>
-            End Date:
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-          </label>
-        </div>
-
-        <div className="topic-input">
-          <label>
-            Topic (optional):
-            <input
-              type="text"
-              placeholder="e.g., politics"
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-            />
-          </label>
-        </div>
-
-        <button onClick={generateSummary} disabled={loading} className="generate-button">
-          {loading ? 'Generating...' : 'Generate Summary'}
-        </button>
-      </div>
-
-      {summary && !summary.error && (
-        <div className="summary-result">
-          <div className="summary-meta">
-            <div><strong>Period:</strong> {summary.date_range}</div>
-            <div><strong>Articles:</strong> {summary.article_count}</div>
-          </div>
-          <div className="summary-text">
-            <h3>Summary:</h3>
-            <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.8' }}>{summary.summary}</p>
-          </div>
-        </div>
-      )}
-
-      {summary && summary.error && (
-        <div className="summary-error">[ERROR] {summary.error}</div>
-      )}
-    </div>
-  );
 };
 
 const TopEntitiesPanel: React.FC = () => {
   const [entityType, setEntityType] = useState<string>('');
   const [entities, setEntities] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [startDate, setStartDate] = useState('1990-01-01');
+  const [endDate, setEndDate] = useState('1992-12-31');
 
   const loadTopEntities = async () => {
     setLoading(true);
     try {
-      const data = await api.getTopEntities(entityType || undefined, 15);
+      const data = await api.getTopEntities(entityType || undefined, 15, startDate, endDate);
       setEntities(data.entities || []);
     } catch (error) {
       console.error('Error loading entities:', error);
@@ -270,39 +60,73 @@ const TopEntitiesPanel: React.FC = () => {
     loadTopEntities();
   }, [entityType]);
 
+  const getEntityIcon = (type: string) => {
+    switch(type) {
+      case 'PERSON': return '👤';
+      case 'ORG': return '🏢';
+      case 'GPE': return '📍';
+      case 'NORP': return '🌐';
+      default: return '🏷️';
+    }
+  };
+
+  const getEntityColor = (type: string) => {
+    switch(type) {
+      case 'PERSON': return '#667eea';
+      case 'ORG': return '#f59e0b';
+      case 'GPE': return '#10b981';
+      case 'NORP': return '#8b5cf6';
+      default: return '#6b7280';
+    }
+  };
+
   return (
     <div className="top-entities-panel">
-      <h3>Top Entities</h3>
-      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
-        Most frequently mentioned people, organizations, and locations across all articles
-      </p>
-
-      <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="entity-type-select">
-        <option value="">All Types</option>
-        <option value="PERSON">People</option>
-        <option value="ORG">Organizations</option>
-        <option value="GPE">Locations</option>
-      </select>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+        <h3 style={{ margin: 0 }}>Top Entities</h3>
+        <select value={entityType} onChange={(e) => setEntityType(e.target.value)}
+                style={{ padding: '4px 8px', fontSize: '13px', border: '1px solid #e5e7eb', borderRadius: '4px' }}>
+          <option value="">All Types</option>
+          <option value="PERSON">👤 People</option>
+          <option value="ORG">🏢 Organizations</option>
+          <option value="GPE">📍 Locations</option>
+          <option value="NORP">🌐 Nationalities</option>
+        </select>
+        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+               style={{ padding: '4px 8px', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px' }} />
+        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+               style={{ padding: '4px 8px', fontSize: '12px', border: '1px solid #e5e7eb', borderRadius: '4px' }} />
+        <button onClick={loadTopEntities}
+                style={{ padding: '4px 12px', fontSize: '13px', background: '#667eea', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer' }}>
+          Refresh
+        </button>
+      </div>
 
       {loading ? (
-        <p>Loading...</p>
+        <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading...</p>
       ) : entities.length > 0 ? (
-        <div className="entities-grid">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.5rem' }}>
           {entities.map((entity, idx) => (
-            <div key={idx} className="entity-item">
-              <div className="entity-rank">#{idx + 1}</div>
-              <div className="entity-info">
-                <div className="entity-name">
-                  {entity.text}
-                </div>
-                <div className="entity-type-label">{entity.type}</div>
+            <div key={idx} style={{
+              padding: '8px',
+              border: '1px solid #e5e7eb',
+              borderLeft: `3px solid ${getEntityColor(entity.type)}`,
+              borderRadius: '4px',
+              fontSize: '13px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px' }}>
+                <span style={{ fontSize: '14px' }}>{getEntityIcon(entity.type)}</span>
+                <span style={{ fontSize: '11px', color: '#9ca3af' }}>#{idx + 1}</span>
               </div>
-              <div className="entity-count">{entity.count}</div>
+              <div style={{ fontWeight: '600', fontSize: '16px', color: getEntityColor(entity.type), marginBottom: '2px' }}>
+                {entity.count.toLocaleString()}
+              </div>
+              <div style={{ fontSize: '12px', fontWeight: '500', color: '#374151' }}>{entity.text}</div>
             </div>
           ))}
         </div>
       ) : (
-        <p>No entities found</p>
+        <p style={{ margin: '1rem 0', fontSize: '14px' }}>No entities found</p>
       )}
     </div>
   );
@@ -338,40 +162,54 @@ const EntityCooccurrence: React.FC = () => {
 
   return (
     <div className="entity-cooccurrence">
-      <h3>Entity Co-occurrence</h3>
-      <p className="subtitle">Entities that frequently appear together in articles</p>
-
-      <select
-        value={entityType}
-        onChange={(e) => setEntityType(e.target.value)}
-        className="entity-type-select"
-      >
-        <option value="">All Types</option>
-        <option value="PERSON">People</option>
-        <option value="ORG">Organizations</option>
-        <option value="GPE">Locations</option>
-      </select>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+        <h3 style={{ margin: 0 }}>Entity Relationships</h3>
+        <span style={{ fontSize: '13px', color: '#6b7280' }}>- Entities mentioned together in articles</span>
+        <select value={entityType} onChange={(e) => setEntityType(e.target.value)}
+                style={{ padding: '4px 8px', fontSize: '13px', border: '1px solid #e5e7eb', borderRadius: '4px', marginLeft: 'auto' }}>
+          <option value="">All Types</option>
+          <option value="PERSON">People</option>
+          <option value="ORG">Organizations</option>
+          <option value="GPE">Locations</option>
+        </select>
+      </div>
 
       {loading ? (
-        <p>Loading...</p>
+        <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading...</p>
       ) : cooccurrences.length > 0 ? (
-        <div className="cooccurrence-list">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '0.5rem' }}>
           {cooccurrences.map((pair, idx) => (
-            <div key={idx} className="cooccurrence-item">
-              <div className="cooccurrence-rank">#{idx + 1}</div>
-              <div className="cooccurrence-entities">
-                <span className="entity">{pair.entity1}</span>
-                <span className="connector">+</span>
-                <span className="entity">{pair.entity2}</span>
+            <div key={idx} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '8px 12px',
+              border: '1px solid #e5e7eb',
+              borderRadius: '4px',
+              fontSize: '13px',
+              background: '#fafafa'
+            }}>
+              <span style={{ fontSize: '11px', color: '#9ca3af', minWidth: '24px' }}>#{idx + 1}</span>
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontWeight: '500', color: '#374151' }}>{pair.entity1}</span>
+                <span style={{ color: '#9ca3af' }}>⟷</span>
+                <span style={{ fontWeight: '500', color: '#374151' }}>{pair.entity2}</span>
               </div>
-              <div className="cooccurrence-count">
-                {pair.cooccurrence_count} {pair.cooccurrence_count === 1 ? 'article' : 'articles'}
-              </div>
+              <span style={{
+                fontSize: '12px',
+                fontWeight: '600',
+                color: '#667eea',
+                background: '#eef2ff',
+                padding: '2px 8px',
+                borderRadius: '12px'
+              }}>
+                {pair.cooccurrence_count}
+              </span>
             </div>
           ))}
         </div>
       ) : (
-        <p>No co-occurrences found</p>
+        <p style={{ margin: '1rem 0', fontSize: '14px' }}>No co-occurrences found</p>
       )}
     </div>
   );
@@ -380,7 +218,6 @@ const EntityCooccurrence: React.FC = () => {
 const MediaScopeDashboard: React.FC = () => {
   const [searchResults, setSearchResults] = useState<any>(null);
   const [activeTab, setActiveTab] = useState<'search' | 'analytics' | 'pages' | 'image-analysis' | 'ocr'>('search');
-  const [analyticsSubTab, setAnalyticsSubTab] = useState<'overview' | 'temporal' | 'entities' | 'topics'>('overview');
   const [searchFilters, setSearchFilters] = useState<any>(null);
 
   useEffect(() => {
@@ -463,123 +300,41 @@ const MediaScopeDashboard: React.FC = () => {
             {/* Summary Cards */}
             <AnalyticsSummary />
 
-            {/* Sub-navigation */}
-            <div className="analytics-tab-nav">
-              <button
-                className={`analytics-tab-button ${analyticsSubTab === 'overview' ? 'active' : ''}`}
-                onClick={() => setAnalyticsSubTab('overview')}
-              >
-                📊 Overview
-              </button>
-              <button
-                className={`analytics-tab-button ${analyticsSubTab === 'temporal' ? 'active' : ''}`}
-                onClick={() => setAnalyticsSubTab('temporal')}
-              >
-                📈 Trends Over Time
-              </button>
-              <button
-                className={`analytics-tab-button ${analyticsSubTab === 'entities' ? 'active' : ''}`}
-                onClick={() => setAnalyticsSubTab('entities')}
-              >
-                🏷️ Entities & Relationships
-              </button>
-              <button
-                className={`analytics-tab-button ${analyticsSubTab === 'topics' ? 'active' : ''}`}
-                onClick={() => setAnalyticsSubTab('topics')}
-              >
-                💡 Topics & Keywords
-              </button>
-            </div>
+            {/* Single streamlined analytics page */}
+            <div className="analytics-section">
+              <h2 className="analytics-section-title">Archive Analytics</h2>
+              <p className="analytics-section-subtitle">
+                Comprehensive analysis of the newspaper archive
+              </p>
 
-            {/* Content for each sub-tab */}
-            <div className="analytics-tab-content">
-              {analyticsSubTab === 'overview' && (
-                <div className="analytics-section">
-                  <h2 className="analytics-section-title">Archive Overview</h2>
-                  <p className="analytics-section-subtitle">
-                    High-level statistics and sentiment breakdown of the entire newspaper archive
-                  </p>
-
-                  <div className="analytics-grid">
-                    <div className="analytics-card">
-                      <SentimentDistribution />
-                    </div>
-                    <div className="analytics-card">
-                      <ArticleLengthDistribution />
-                    </div>
-                  </div>
-
-                  <div className="analytics-grid">
-                    <div className="analytics-card">
-                      <TopicDistribution />
-                    </div>
-                    <div className="analytics-card">
-                      <KeywordTrendChart />
-                    </div>
-                  </div>
+              {/* Row 1: Sentiment & Topics */}
+              <div className="analytics-grid">
+                <div className="analytics-card">
+                  <SentimentDistribution />
                 </div>
-              )}
-
-              {analyticsSubTab === 'temporal' && (
-                <div className="analytics-section">
-                  <h2 className="analytics-section-title">Temporal Analysis</h2>
-                  <p className="analytics-section-subtitle">
-                    How coverage, sentiment, and topics evolved over time
-                  </p>
-
-                  <div className="analytics-card full-width">
-                    <CoverageHeatmap />
-                  </div>
-
-                  <div className="analytics-grid">
-                    <div className="analytics-card">
-                      <ArticlesOverTime />
-                    </div>
-                    <div className="analytics-card">
-                      <SentimentOverTime />
-                    </div>
-                  </div>
+                <div className="analytics-card">
+                  <TopicDistribution />
                 </div>
-              )}
+              </div>
 
-              {analyticsSubTab === 'entities' && (
-                <div className="analytics-section">
-                  <h2 className="analytics-section-title">Entity Analysis</h2>
-                  <p className="analytics-section-subtitle">
-                    People, organizations, and locations mentioned in the archive
-                  </p>
+              {/* Row 2: Top Entities */}
+              <div className="analytics-card full-width">
+                <TopEntitiesPanel />
+              </div>
 
-                  <div className="analytics-card full-width">
-                    <EntityTimeline />
-                  </div>
+              {/* Row 3: Entity Co-occurrence */}
+              <div className="analytics-card full-width">
+                <EntityCooccurrenceNetwork />
+              </div>
 
-                  <div className="analytics-card full-width">
-                    <SentimentByEntityChart />
-                  </div>
+              {/* Row 4: Temporal Analysis */}
+              <div className="analytics-card full-width">
+                <KeywordFrequencyOverTime />
+              </div>
 
-                  <div className="analytics-card full-width">
-                    <EntityCooccurrenceNetwork />
-                  </div>
-                </div>
-              )}
-
-              {analyticsSubTab === 'topics' && (
-                <div className="analytics-section">
-                  <h2 className="analytics-section-title">Topics & Keywords</h2>
-                  <p className="analytics-section-subtitle">
-                    Main themes, topics, and frequently mentioned terms
-                  </p>
-
-                  <div className="analytics-grid">
-                    <div className="analytics-card">
-                      <TopEntitiesPanel />
-                    </div>
-                    <div className="analytics-card">
-                      <TopKeywordsCloud />
-                    </div>
-                  </div>
-                </div>
-              )}
+              <div className="analytics-card full-width">
+                <EntityMentionsOverTime />
+              </div>
             </div>
           </div>
         )}

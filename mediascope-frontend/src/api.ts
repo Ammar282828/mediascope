@@ -43,9 +43,14 @@ export default {
     return response.data;
   },
 
-  getTopEntities: async (type?: string, limit = 10) => {
+  getTopEntities: async (type?: string, limit = 10, startDate?: string, endDate?: string) => {
     const response = await api.get('/api/analytics/top-entities-fixed', {
-      params: { entity_type: type, limit }
+      params: {
+        entity_type: type,
+        limit,
+        start_date: startDate,
+        end_date: endDate
+      }
     });
     return response.data;
   },

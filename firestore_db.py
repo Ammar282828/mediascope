@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, storage
 from google.cloud.firestore_v1.base_query import FieldFilter
 
 class FirestoreDB:
@@ -26,16 +26,25 @@ class FirestoreDB:
         if not firebase_admin._apps:
             # Try to load from service account file
             service_account_path = os.getenv('FIREBASE_SERVICE_ACCOUNT_PATH')
+            storage_bucket = os.getenv('FIREBASE_STORAGE_BUCKET')  # e.g., 'your-project.appspot.com'
 
             if service_account_path and os.path.exists(service_account_path):
                 cred = credentials.Certificate(service_account_path)
-                firebase_admin.initialize_app(cred)
+                firebase_admin.initialize_app(cred, {
+                    'storageBucket': storage_bucket
+                })
             else:
                 # Try to initialize with default credentials or environment variable
                 firebase_admin.initialize_app()
 
         self.db = firestore.client()
-        print("[OK] Connected to Firebase Firestore")
+        try:
+            self.bucket = storage.bucket()
+            print("[OK] Connected to Firebase Firestore and Storage")
+        except Exception as e:
+            print(f"[WARNING] Storage not available: {e}")
+            self.bucket = None
+            print("[OK] Connected to Firebase Firestore (Storage disabled)")
 
     def _get_cached(self, key: str):
         """Get value from cache if not expired"""
@@ -122,7 +131,7 @@ class FirestoreDB:
         """
         try:
             # Get all articles and search in them
-            all_articles = self.db.collection('articles').limit(1000).stream()
+            all_articles = self.db.collection('articles').stream()
 
             results_with_score = []
             query_lower = query.lower()
@@ -208,7 +217,7 @@ class FirestoreDB:
 
         try:
             # Get all articles
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             # Group by month
             monthly_counts = {}
@@ -240,7 +249,7 @@ class FirestoreDB:
     def get_analytics_sentiment_over_time(self) -> List[Dict]:
         """Get sentiment distribution over time"""
         try:
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             # Group by month and sentiment
             monthly_sentiment = {}
@@ -281,7 +290,7 @@ class FirestoreDB:
         try:
             import re
             # This is a simplified version - in production you'd use proper keyword extraction
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             word_freq = {}
             # Comprehensive stop words list
@@ -344,6 +353,7 @@ class FirestoreDB:
         # Manual mapping for common variants (most comprehensive)
         normalization_map = {
             # Pakistan variants
+            'pakist': 'pakistan',  # Catch truncated form
             'pakistani': 'pakistan',
             'pakistanis': 'pakistan',
             'paki': 'pakistan',
@@ -355,14 +365,39 @@ class FirestoreDB:
             'indians': 'india',
             'india': 'india',
 
+            # Palestine variants
+            'palestin': 'palestine',  # Catch truncated form
+            'palestine': 'palestine',
+            'palestinian': 'palestine',
+            'palestinians': 'palestine',
+            'plo': 'palestine',  # Palestinian Liberation Organization
+
+            # Syria variants
+            'syr': 'syria',  # Catch truncated form
+            'syria': 'syria',
+            'syrian': 'syria',
+            'syrians': 'syria',
+
+            # Lebanon variants
+            'lebanon': 'lebanon',
+            'lebanese': 'lebanon',
+
+            # Egypt variants
+            'egypt': 'egypt',
+            'egyptian': 'egypt',
+            'egyptians': 'egypt',
+
             # America variants
             'american': 'america',
             'americans': 'america',
             'america': 'america',
+            'us': 'america',
+            'usa': 'america',
 
             # Britain variants
             'british': 'britain',
             'britain': 'britain',
+            'uk': 'britain',
 
             # Pakistan cities
             'karachi': 'karachi',
@@ -371,6 +406,19 @@ class FirestoreDB:
             'lahori': 'lahore',
             'lahoris': 'lahore',
             'islamabad': 'islamabad',
+
+            # Middle East
+            'arab': 'arab',
+            'arabs': 'arab',
+            'saudi': 'saudi arabia',
+            'saudis': 'saudi arabia',
+            'saudi arabia': 'saudi arabia',
+            'jordan': 'jordan',
+            'jordanian': 'jordan',
+            'jordanians': 'jordan',
+            'kuwait': 'kuwait',
+            'kuwaiti': 'kuwait',
+            'kuwaitis': 'kuwait',
 
             # Other countries
             'soviet': 'ussr',
@@ -425,7 +473,7 @@ class FirestoreDB:
     def get_sentiment_by_entity(self, entity_type: Optional[str] = None, limit: int = 20) -> List[Dict]:
         """Get sentiment statistics for entities"""
         try:
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             entity_sentiment = {}
 
@@ -492,16 +540,27 @@ class FirestoreDB:
             print(f"[ERROR] Entity sentiment analysis failed: {e}")
             return []
 
-    def get_top_entities(self, entity_type: Optional[str] = None, limit: int = 15) -> List[Dict]:
+    def get_top_entities(self, entity_type: Optional[str] = None, limit: int = 15,
+                         start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[Dict]:
         """Get top entities by frequency"""
         try:
             import re
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             entity_counts = {}
 
             for doc in articles:
                 data = doc.to_dict()
+
+                # Filter by date range if specified
+                if start_date or end_date:
+                    pub_date_raw = data.get('publication_date')
+                    pub_date = self._normalize_date(pub_date_raw)
+                    if start_date and pub_date and pub_date < start_date:
+                        continue
+                    if end_date and pub_date and pub_date > end_date:
+                        continue
+
                 entities = data.get('entities', [])
 
                 for entity in entities:
@@ -554,7 +613,7 @@ class FirestoreDB:
             from itertools import combinations
             from collections import defaultdict
 
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             # Track entity pairs
             pair_counts = defaultdict(int)
@@ -622,7 +681,7 @@ class FirestoreDB:
         """Get topic distribution across all articles"""
         try:
             from collections import defaultdict
-            articles = self.db.collection('articles').limit(1000).stream()
+            articles = self.db.collection('articles').stream()
 
             topic_counts = defaultdict(int)
             total_articles = 0
@@ -649,6 +708,367 @@ class FirestoreDB:
         except Exception as e:
             print(f"[ERROR] Topic distribution analysis failed: {e}")
             return []
+
+    def _normalize_date(self, date_value):
+        """Convert Firestore date to string format YYYY-MM-DD"""
+        if hasattr(date_value, 'strftime'):
+            # It's a datetime object
+            return date_value.strftime('%Y-%m-%d')
+        # It's already a string
+        return str(date_value) if date_value else None
+
+    def get_keyword_frequency_over_time(self, keyword: str, start_date: Optional[str] = None,
+                                        end_date: Optional[str] = None, granularity: str = 'month') -> List[Dict]:
+        """Get keyword mention frequency over time
+
+        Args:
+            keyword: The keyword to track
+            start_date: Start date (YYYY-MM-DD format)
+            end_date: End date (YYYY-MM-DD format)
+            granularity: 'day', 'week', or 'month'
+        """
+        try:
+            from datetime import datetime
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').stream()
+            keyword_lower = keyword.lower()
+            time_counts = defaultdict(int)
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date_raw = data.get('publication_date')
+                if not pub_date_raw:
+                    continue
+
+                pub_date = self._normalize_date(pub_date_raw)
+                if not pub_date:
+                    continue
+
+                # Filter by date range if provided
+                if start_date and pub_date < start_date:
+                    continue
+                if end_date and pub_date > end_date:
+                    continue
+
+                # Check if keyword appears in article
+                text = (data.get('headline', '') + ' ' + data.get('full_text', '')).lower()
+                if keyword_lower in text:
+                    # Group by granularity
+                    if granularity == 'day':
+                        time_key = pub_date[:10]  # YYYY-MM-DD
+                    elif granularity == 'week':
+                        dt = datetime.fromisoformat(pub_date[:10])
+                        time_key = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+                    else:  # month
+                        time_key = pub_date[:7]  # YYYY-MM
+
+                    time_counts[time_key] += 1
+
+            # Convert to sorted list
+            results = [{'date': k, 'count': v} for k, v in time_counts.items()]
+            results.sort(key=lambda x: x['date'])
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Keyword frequency over time failed: {e}")
+            return []
+
+    def get_entity_mentions_over_time(self, entity_name: str, start_date: Optional[str] = None,
+                                     end_date: Optional[str] = None, granularity: str = 'month') -> List[Dict]:
+        """Get entity mention frequency over time with sentiment"""
+        try:
+            from datetime import datetime
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').stream()
+            entity_lower = self._normalize_entity_name(entity_name).lower()
+            time_data = defaultdict(lambda: {'count': 0, 'positive': 0, 'negative': 0, 'neutral': 0})
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date_raw = data.get('publication_date')
+                if not pub_date_raw:
+                    continue
+
+                pub_date = self._normalize_date(pub_date_raw)
+                if not pub_date:
+                    continue
+
+                # Filter by date range
+                if start_date and pub_date < start_date:
+                    continue
+                if end_date and pub_date > end_date:
+                    continue
+
+                # Check if entity is mentioned
+                entities = data.get('entities', [])
+                entity_found = False
+                for ent in entities:
+                    if self._normalize_entity_name(ent.get('text', '')).lower() == entity_lower:
+                        entity_found = True
+                        break
+
+                if entity_found:
+                    # Group by granularity
+                    if granularity == 'day':
+                        time_key = pub_date[:10]
+                    elif granularity == 'week':
+                        dt = datetime.fromisoformat(pub_date[:10])
+                        time_key = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+                    else:  # month
+                        time_key = pub_date[:7]
+
+                    time_data[time_key]['count'] += 1
+                    sentiment = data.get('sentiment_label', 'neutral')
+                    time_data[time_key][sentiment] += 1
+
+            # Convert to sorted list
+            results = []
+            for date, stats in sorted(time_data.items()):
+                results.append({
+                    'date': date,
+                    'count': stats['count'],
+                    'positive': stats['positive'],
+                    'negative': stats['negative'],
+                    'neutral': stats['neutral'],
+                    'sentiment_score': (stats['positive'] - stats['negative']) / stats['count'] if stats['count'] > 0 else 0
+                })
+
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Entity mentions over time failed: {e}")
+            return []
+
+    def compare_entities(self, entity_names: List[str], start_date: Optional[str] = None,
+                        end_date: Optional[str] = None) -> Dict:
+        """Compare multiple entities across various metrics"""
+        try:
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').stream()
+            entity_data = {name: {
+                'total_mentions': 0,
+                'positive': 0,
+                'negative': 0,
+                'neutral': 0,
+                'topics': defaultdict(int),
+                'cooccurrences': defaultdict(int)
+            } for name in entity_names}
+
+            normalized_entities = {self._normalize_entity_name(name).lower(): name for name in entity_names}
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date_raw = data.get('publication_date')
+                if not pub_date_raw:
+                    continue
+
+                pub_date = self._normalize_date(pub_date_raw)
+                if not pub_date:
+                    continue
+
+                # Filter by date range
+                if start_date and pub_date < start_date:
+                    continue
+                if end_date and pub_date > end_date:
+                    continue
+
+                entities = data.get('entities', [])
+                sentiment = data.get('sentiment_label', 'neutral')
+                topic = data.get('topic_label', 'Uncategorized')
+
+                # Check which entities appear in this article
+                found_entities = []
+                for ent in entities:
+                    normalized = self._normalize_entity_name(ent.get('text', '')).lower()
+                    if normalized in normalized_entities:
+                        original_name = normalized_entities[normalized]
+                        found_entities.append(original_name)
+                        entity_data[original_name]['total_mentions'] += 1
+                        entity_data[original_name][sentiment] += 1
+                        entity_data[original_name]['topics'][topic] += 1
+
+                # Track co-occurrences
+                for i, ent1 in enumerate(found_entities):
+                    for ent2 in found_entities[i+1:]:
+                        entity_data[ent1]['cooccurrences'][ent2] += 1
+                        entity_data[ent2]['cooccurrences'][ent1] += 1
+
+            # Format results
+            results = {}
+            for name, data in entity_data.items():
+                total = data['total_mentions']
+                results[name] = {
+                    'total_mentions': total,
+                    'sentiment': {
+                        'positive': data['positive'],
+                        'negative': data['negative'],
+                        'neutral': data['neutral'],
+                        'score': (data['positive'] - data['negative']) / total if total > 0 else 0
+                    },
+                    'top_topics': sorted(data['topics'].items(), key=lambda x: x[1], reverse=True)[:5],
+                    'top_cooccurrences': sorted(data['cooccurrences'].items(), key=lambda x: x[1], reverse=True)[:5]
+                }
+
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Entity comparison failed: {e}")
+            return {}
+
+    def get_topic_volume_over_time(self, start_date: Optional[str] = None,
+                                   end_date: Optional[str] = None, granularity: str = 'month') -> List[Dict]:
+        """Get topic distribution over time"""
+        try:
+            from datetime import datetime
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').stream()
+            time_topics = defaultdict(lambda: defaultdict(int))
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date_raw = data.get('publication_date')
+                if not pub_date_raw:
+                    continue
+
+                pub_date = self._normalize_date(pub_date_raw)
+                if not pub_date:
+                    continue
+
+                # Filter by date range
+                if start_date and pub_date < start_date:
+                    continue
+                if end_date and pub_date > end_date:
+                    continue
+
+                topic = data.get('topic_label', 'Uncategorized')
+
+                # Group by granularity
+                if granularity == 'day':
+                    time_key = pub_date[:10]
+                elif granularity == 'week':
+                    dt = datetime.fromisoformat(pub_date[:10])
+                    time_key = f"{dt.year}-W{dt.isocalendar()[1]:02d}"
+                else:  # month
+                    time_key = pub_date[:7]
+
+                time_topics[time_key][topic] += 1
+
+            # Convert to format suitable for stacked area chart
+            results = []
+            for date in sorted(time_topics.keys()):
+                entry = {'date': date}
+                entry.update(time_topics[date])
+                results.append(entry)
+
+            return results
+
+        except Exception as e:
+            print(f"[ERROR] Topic volume over time failed: {e}")
+            return []
+
+    def get_location_analytics(self, start_date: Optional[str] = None,
+                               end_date: Optional[str] = None) -> Dict:
+        """Get geographic analytics - top locations, their topics, and sentiment"""
+        try:
+            from collections import defaultdict
+
+            articles = self.db.collection('articles').stream()
+            location_data = defaultdict(lambda: {
+                'count': 0,
+                'topics': defaultdict(int),
+                'sentiment': {'positive': 0, 'negative': 0, 'neutral': 0},
+                'over_time': defaultdict(int)
+            })
+
+            for doc in articles:
+                data = doc.to_dict()
+                pub_date_raw = data.get('publication_date')
+                if not pub_date_raw:
+                    continue
+
+                pub_date = self._normalize_date(pub_date_raw)
+                if not pub_date:
+                    continue
+
+                # Filter by date range
+                if start_date and pub_date < start_date:
+                    continue
+                if end_date and pub_date > end_date:
+                    continue
+
+                entities = data.get('entities', [])
+                sentiment = data.get('sentiment_label', 'neutral')
+                topic = data.get('topic_label', 'Uncategorized')
+                month = pub_date[:7]
+
+                # Extract locations (GPE type)
+                for ent in entities:
+                    if ent.get('label') == 'GPE':
+                        location = self._normalize_entity_name(ent.get('text', '')).title()
+                        location_data[location]['count'] += 1
+                        location_data[location]['topics'][topic] += 1
+                        location_data[location]['sentiment'][sentiment] += 1
+                        location_data[location]['over_time'][month] += 1
+
+            # Format results
+            results = []
+            for location, data in sorted(location_data.items(), key=lambda x: x[1]['count'], reverse=True)[:20]:
+                total = data['count']
+                results.append({
+                    'location': location,
+                    'total_mentions': total,
+                    'top_topics': sorted(data['topics'].items(), key=lambda x: x[1], reverse=True)[:3],
+                    'sentiment': data['sentiment'],
+                    'sentiment_score': (data['sentiment']['positive'] - data['sentiment']['negative']) / total if total > 0 else 0,
+                    'timeline': [{'date': k, 'count': v} for k, v in sorted(data['over_time'].items())]
+                })
+
+            return {'locations': results}
+
+        except Exception as e:
+            print(f"[ERROR] Location analytics failed: {e}")
+            return {'locations': []}
+
+    def upload_newspaper_image(self, image_path: str, newspaper_id: str) -> Optional[str]:
+        """Upload newspaper image to Firebase Storage and return public URL
+
+        Args:
+            image_path: Path to the image file
+            newspaper_id: Unique ID for the newspaper
+
+        Returns:
+            Public URL of the uploaded image, or None if upload failed
+        """
+        if not self.bucket:
+            print("[WARNING] Firebase Storage not initialized")
+            return None
+
+        try:
+            from pathlib import Path
+
+            # Create storage path
+            filename = Path(image_path).name
+            storage_path = f"newspapers/{newspaper_id}/{filename}"
+
+            # Upload file
+            blob = self.bucket.blob(storage_path)
+            blob.upload_from_filename(image_path)
+
+            # Make publicly accessible
+            blob.make_public()
+
+            # Return public URL
+            public_url = blob.public_url
+            print(f"[OK] Uploaded image to Storage: {storage_path}")
+            return public_url
+
+        except Exception as e:
+            print(f"[ERROR] Failed to upload image to Storage: {e}")
+            return None
 
     def close(self):
         """Close Firestore connection (no-op for Firestore)"""

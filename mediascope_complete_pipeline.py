@@ -22,7 +22,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Image processing
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageOps
 import google.generativeai as genai
 
 # NLP
@@ -41,7 +41,7 @@ from dataclasses import dataclass
 class Config:
     """Configuration for MediaScope pipeline"""
     # Gemini API - Read from environment variable or use default
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "AIzaSyClPZG8_B4rieQwSMkXGYDJU5MgMtW9H6k")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "AIzaSyBtUk2lUskKgLDhpmxFf6Lfz6IAh7RH5bg")
     GEMINI_MODEL: str = "gemini-3-pro-preview"
     
     # PostgreSQL
@@ -84,10 +84,36 @@ class MediaScopeDatabase:
 
     def insert_newspaper(self, pub_date: datetime, page_num: int,
                         section: str, image_path: str) -> str:
-        """Insert newspaper record and return ID (stored with article in Firestore)"""
-        # In Firestore, we store newspaper metadata with each article
-        # Generate a newspaper_id for reference
+        """Insert newspaper record with image to Firebase Storage + Firestore"""
         newspaper_id = str(uuid.uuid4())
+
+        # Upload image to Firebase Storage
+        try:
+            image_url = self.db.upload_newspaper_image(image_path, newspaper_id)
+
+            if not image_url:
+                print(f"[WARNING] Failed to upload image to Storage, continuing without image")
+
+            # Create newspaper document
+            newspaper_doc = {
+                'id': newspaper_id,
+                'publication_date': pub_date,
+                'page_number': page_num,
+                'section': section,
+                'image_url': image_url,  # Public URL from Firebase Storage
+                'image_filename': Path(image_path).name,
+                'created_at': datetime.now(),
+                'article_count': 0,  # Will be updated later
+                'avg_sentiment': 0.0  # Will be calculated later
+            }
+
+            # Store in Firestore newspapers collection
+            self.db.db.collection('newspapers').document(newspaper_id).set(newspaper_doc)
+            print(f"[OK] Stored newspaper in Firestore: {newspaper_id}")
+
+        except Exception as e:
+            print(f"[WARNING] Failed to save newspaper: {e}")
+
         return newspaper_id
 
     def insert_article(self, newspaper_id: str, article_data: Dict) -> str:
@@ -168,11 +194,52 @@ class ImageProcessor:
             safety_settings=self.safety_settings
         )
     
+    def extract_date_from_filename(self, image_path: str) -> Optional[datetime]:
+        """Try to extract date from filename using common patterns"""
+        filename = Path(image_path).stem  # Get filename without extension
+
+        # Common date patterns in filenames
+        patterns = [
+            r'(\d{4})-(\d{2})-(\d{2})',  # 1990-01-15
+            r'(\d{4})_(\d{2})_(\d{2})',  # 1990_01_15
+            r'(\d{2})-(\d{2})-(\d{4})',  # 15-01-1990
+            r'(\d{2})_(\d{2})_(\d{4})',  # 15_01_1990
+            r'(\d{8})',                   # 19900115
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, filename)
+            if match:
+                try:
+                    if len(match.groups()) == 3:
+                        g1, g2, g3 = match.groups()
+                        # Check if first group is year (4 digits)
+                        if len(g1) == 4:
+                            year, month, day = int(g1), int(g2), int(g3)
+                        else:
+                            day, month, year = int(g1), int(g2), int(g3)
+                    else:  # Format: YYYYMMDD
+                        date_str = match.group(1)
+                        year = int(date_str[:4])
+                        month = int(date_str[4:6])
+                        day = int(date_str[6:8])
+
+                    date = datetime(year, month, day)
+                    print(f"  [OK] Extracted date from filename: {date.strftime('%Y-%m-%d')}")
+                    return date
+                except (ValueError, IndexError):
+                    continue
+
+        return None
+
     def extract_metadata(self, image_path: str) -> Dict:
-        """Extract date and page number from newspaper"""
+        """Extract date and page number from newspaper (filename first, then OCR)"""
+        # Try filename first (faster and more reliable if available)
+        filename_date = self.extract_date_from_filename(image_path)
+
         try:
             img = Image.open(image_path)
-            
+
             prompt = """Extract from this newspaper scan:
 1. Publication date (month, day, year)
 2. Page number
@@ -190,29 +257,42 @@ If not found, write UNKNOWN."""
                 safety_settings=self.safety_settings
             )
             text = response.text if response.parts else ""
-            
+
             month_match = re.search(r'MONTH:\s*(\w+)', text, re.IGNORECASE)
             day_match = re.search(r'DAY:\s*(\d+)', text, re.IGNORECASE)
             year_match = re.search(r'YEAR:\s*(\d+)', text, re.IGNORECASE)
             page_match = re.search(r'PAGE:\s*(\d+)', text, re.IGNORECASE)
-            
-            month = month_match.group(1) if month_match else "January"
-            day = int(day_match.group(1)) if day_match else 1
-            year = int(year_match.group(1)) if year_match else 1990
+
+            # Use filename date if OCR failed to find date
+            if filename_date and (not month_match or not day_match or not year_match):
+                pub_date = filename_date
+                print(f"  [OK] Using filename date: {pub_date.strftime('%Y-%m-%d')}")
+            else:
+                month = month_match.group(1) if month_match else "January"
+                day = int(day_match.group(1)) if day_match else 1
+                year = int(year_match.group(1)) if year_match else 1990
+
+                # Convert month name to number
+                month_num = datetime.strptime(month[:3], '%b').month
+                pub_date = datetime(year, month_num, day)
+
             page = int(page_match.group(1)) if page_match else 1
-            
-            # Convert month name to number
-            month_num = datetime.strptime(month[:3], '%b').month
-            pub_date = datetime(year, month_num, day)
-            
+
             return {
                 'date': pub_date,
                 'page': page,
                 'success': True
             }
-            
+
         except Exception as e:
             print(f"  [WARNING] Metadata extraction failed: {e}")
+            # Fall back to filename date if available
+            if filename_date:
+                return {
+                    'date': filename_date,
+                    'page': 1,
+                    'success': True
+                }
             return {
                 'date': datetime(1990, 1, 1),
                 'page': 1,
@@ -220,22 +300,28 @@ If not found, write UNKNOWN."""
             }
     
     def enhance_image(self, image: Image.Image) -> Image.Image:
-        """Enhance image for better OCR"""
+        """Enhance image for better OCR with auto-rotation"""
+        # Handle EXIF orientation (auto-rotate based on camera metadata)
+        try:
+            image = ImageOps.exif_transpose(image)
+        except Exception:
+            pass  # If EXIF data missing or invalid, continue without rotation
+
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
+
         # Increase contrast
         enhancer = ImageEnhance.Contrast(image)
         image = enhancer.enhance(1.3)
-        
+
         # Increase sharpness
         enhancer = ImageEnhance.Sharpness(image)
         image = enhancer.enhance(1.2)
-        
+
         # Increase brightness slightly
         enhancer = ImageEnhance.Brightness(image)
         image = enhancer.enhance(1.1)
-        
+
         return image
     
     def extract_articles(self, image_path: str) -> List[Dict]:
@@ -373,16 +459,33 @@ class NLPProcessor:
         }
     
     def train_topic_model(self, documents: List[str]) -> BERTopic:
-        """Train BERTopic model on documents"""
+        """Train BERTopic model on documents with improved parameters"""
         print("Training topic model...")
+
+        from sklearn.feature_extraction.text import CountVectorizer
+
+        # Custom vectorizer to filter out common words and use bigrams
+        vectorizer_model = CountVectorizer(
+            ngram_range=(1, 2),
+            stop_words="english",
+            min_df=2,
+            max_df=0.7
+        )
 
         self.topic_model = BERTopic(
             embedding_model=self.embedding_model,
+            vectorizer_model=vectorizer_model,
             nr_topics="auto",
-            min_topic_size=10
+            min_topic_size=30,  # Larger minimum for more coherent topics
+            calculate_probabilities=True,
+            verbose=True
         )
 
         topics, probs = self.topic_model.fit_transform(documents)
+
+        # Store documents for later retrieval
+        self.topic_documents = documents
+        self.topic_assignments = topics
 
         print(f"[OK] Discovered {len(set(topics))} topics")
         return self.topic_model
@@ -507,6 +610,28 @@ class MediaScopePipeline:
                     import traceback
                     traceback.print_exc()
                     continue  # Continue with next article
+
+            # Update newspaper statistics
+            if articles_processed > 0:
+                # Calculate average sentiment from all articles
+                articles_query = self.db.db.collection('articles').where('newspaper_id', '==', newspaper_id).stream()
+                total_sentiment = 0
+                article_count = 0
+
+                for article_doc in articles_query:
+                    article_data = article_doc.to_dict()
+                    total_sentiment += article_data.get('sentiment_score', 0)
+                    article_count += 1
+
+                avg_sentiment = total_sentiment / article_count if article_count > 0 else 0
+
+                # Update newspaper document
+                newspaper_ref = self.db.db.collection('newspapers').document(newspaper_id)
+                newspaper_ref.update({
+                    'article_count': article_count,
+                    'avg_sentiment': round(avg_sentiment, 3)
+                })
+                print(f"[OK] Updated newspaper stats: {article_count} articles, avg sentiment: {avg_sentiment:.3f}")
 
             print(f"\n{'='*50}")
             print(f"[OK] Newspaper processing complete")

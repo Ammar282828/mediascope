@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from typing import Optional, List
@@ -265,12 +265,14 @@ def keyword_suggestions(limit: int = 100):
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/analytics/top-entities-fixed")
-def top_entities(entity_type: Optional[str] = None, limit: int = 15):
+def top_entities(entity_type: Optional[str] = None, limit: int = 15,
+                start_date: Optional[str] = None, end_date: Optional[str] = None):
     """Get top entities with proper error handling"""
     limit = min(limit, 100)  # Cap at 100
     try:
         db = get_db()
-        entities = db.get_top_entities(entity_type=entity_type, limit=limit)
+        entities = db.get_top_entities(entity_type=entity_type, limit=limit,
+                                      start_date=start_date, end_date=end_date)
         return {"entities": entities}
     except HTTPException:
         raise
@@ -939,6 +941,34 @@ def topic_distribution():
     except Exception as e:
         raise HTTPException(500, f"Database error: {str(e)}")
 
+@app.get("/api/newspapers/{newspaper_id}/image")
+def get_newspaper_image(newspaper_id: str):
+    """Get newspaper image URL from Firebase Storage"""
+    from fastapi.responses import RedirectResponse
+
+    try:
+        db = get_firestore_db()
+        newspaper_ref = db.db.collection('newspapers').document(newspaper_id)
+        newspaper_doc = newspaper_ref.get()
+
+        if not newspaper_doc.exists:
+            raise HTTPException(404, "Newspaper not found")
+
+        newspaper_data = newspaper_doc.to_dict()
+        image_url = newspaper_data.get('image_url')
+
+        if not image_url:
+            raise HTTPException(404, "No image URL found")
+
+        # Redirect to Firebase Storage public URL
+        return RedirectResponse(url=image_url)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching newspaper image: {e}")
+        raise HTTPException(500, f"Failed to fetch image: {str(e)}")
+
 @app.get("/api/newspapers")
 def search_newspapers(
     start_date: Optional[str] = None,
@@ -950,75 +980,56 @@ def search_newspapers(
     limit = min(limit, 200)
     try:
         from datetime import datetime as dt
-        from collections import defaultdict
 
-        db = get_db()
-        articles = db.db.collection('articles').limit(1000).stream()
+        db = get_firestore_db()
 
-        # Group articles by (publication_date, page_number)
-        newspapers_dict = defaultdict(lambda: {
-            'articles': [],
-            'sentiment_scores': []
-        })
+        # Fetch from newspapers collection
+        query = db.db.collection('newspapers')
 
-        for doc in articles:
-            data = doc.to_dict()
-            pub_date = data.get('publication_date')
-            page_num = data.get('page_number', 1)
+        # Apply filters
+        if start_date:
+            start_dt = dt.fromisoformat(start_date)
+            query = query.where('publication_date', '>=', start_dt)
 
-            if not pub_date:
-                continue
+        if end_date:
+            end_dt = dt.fromisoformat(end_date)
+            query = query.where('publication_date', '<=', end_dt)
 
-            # Convert to datetime if needed
-            if isinstance(pub_date, str):
-                pub_date = dt.fromisoformat(pub_date.replace('Z', '+00:00'))
+        if page_number is not None:
+            query = query.where('page_number', '==', page_number)
 
-            # Filter by date range
-            if start_date:
-                start_dt = dt.fromisoformat(start_date)
-                if pub_date < start_dt:
-                    continue
-            if end_date:
-                end_dt = dt.fromisoformat(end_date)
-                if pub_date > end_dt:
-                    continue
+        # Execute query and limit results
+        newspapers_stream = query.limit(limit).stream()
 
-            # Filter by page number
-            if page_number is not None and page_num != page_number:
-                continue
-
-            # Group by (date, page) - use newspaper_id if available, otherwise create key
-            newspaper_id = data.get('newspaper_id', f"{pub_date.strftime('%Y-%m-%d')}_p{page_num}")
-            key = (pub_date.strftime('%Y-%m-%d'), page_num, newspaper_id)
-
-            newspapers_dict[key]['articles'].append(data)
-            if data.get('sentiment_score') is not None:
-                newspapers_dict[key]['sentiment_scores'].append(data.get('sentiment_score'))
-
-        # Convert to list format
         newspapers = []
-        for (date_str, page_num, newspaper_id), info in newspapers_dict.items():
-            avg_sentiment = (
-                sum(info['sentiment_scores']) / len(info['sentiment_scores'])
-                if info['sentiment_scores'] else 0
-            )
+        for doc in newspapers_stream:
+            data = doc.to_dict()
+
+            # Format publication date
+            pub_date = data.get('publication_date')
+            if hasattr(pub_date, 'isoformat'):
+                pub_date_str = pub_date.isoformat()
+            else:
+                pub_date_str = str(pub_date)
+
             newspapers.append({
-                'id': newspaper_id,
-                'publication_date': date_str,
-                'page_number': page_num,
-                'section': 'Main',
-                'article_count': len(info['articles']),
-                'avg_sentiment': round(avg_sentiment, 3)
+                'id': data.get('id'),
+                'publication_date': pub_date_str,
+                'page_number': data.get('page_number', 1),
+                'section': data.get('section', 'Main'),
+                'article_count': data.get('article_count', 0),
+                'avg_sentiment': data.get('avg_sentiment', 0.0)
             })
 
         # Sort by date (desc) and page (asc)
         newspapers.sort(key=lambda x: (x['publication_date'], x['page_number']), reverse=True)
 
         return {
-            "newspapers": newspapers[:limit],
+            "newspapers": newspapers,
             "count": len(newspapers)
         }
     except Exception as e:
+        print(f"Error searching newspapers: {e}")
         raise HTTPException(500, f"Database error: {str(e)}")
 
 @app.get("/api/newspapers/{newspaper_id}")
@@ -1124,6 +1135,61 @@ Summary:"""
     except Exception as e:
         print(f"Error generating summary: {e}")
         return {"error": f"Failed to generate summary: {str(e)}"}
+
+@app.patch("/api/newspapers/{newspaper_id}/date")
+def update_newspaper_date(newspaper_id: str, new_date: str = Body(..., embed=True)):
+    """Update newspaper publication date and propagate to all articles"""
+    try:
+        # Parse the new date
+        from datetime import datetime
+        try:
+            parsed_date = datetime.fromisoformat(new_date.replace('Z', '+00:00'))
+        except:
+            # Try common formats
+            for fmt in ['%Y-%m-%d', '%d-%m-%Y', '%m/%d/%Y']:
+                try:
+                    parsed_date = datetime.strptime(new_date, fmt)
+                    break
+                except:
+                    continue
+            else:
+                raise HTTPException(400, f"Invalid date format: {new_date}. Use YYYY-MM-DD")
+
+        db = get_firestore_db()
+
+        # Update newspaper date
+        newspaper_ref = db.db.collection('newspapers').document(newspaper_id)
+        newspaper_doc = newspaper_ref.get()
+
+        if not newspaper_doc.exists:
+            raise HTTPException(404, "Newspaper not found")
+
+        newspaper_ref.update({
+            'publication_date': parsed_date
+        })
+
+        # Update all articles from this newspaper
+        articles_query = db.db.collection('articles').where('newspaper_id', '==', newspaper_id).stream()
+
+        updated_count = 0
+        for article_doc in articles_query:
+            article_doc.reference.update({
+                'publication_date': parsed_date
+            })
+            updated_count += 1
+
+        return {
+            "status": "success",
+            "newspaper_id": newspaper_id,
+            "new_date": parsed_date.strftime('%Y-%m-%d'),
+            "articles_updated": updated_count
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error updating newspaper date: {e}")
+        raise HTTPException(500, f"Failed to update date: {str(e)}")
 
 @app.get("/api/articles/{article_id}/related")
 def get_related_articles(article_id: str, limit: int = 10):
@@ -1368,6 +1434,7 @@ def train_topic_model():
 
         documents = []
         article_ids = []
+        article_metadata = []
 
         for doc in articles_stream:
             data = doc.to_dict()
@@ -1380,21 +1447,29 @@ def train_topic_model():
             if combined_text.strip():
                 documents.append(combined_text)
                 article_ids.append(data.get('id'))
+                article_metadata.append({
+                    'id': data.get('id'),
+                    'headline': headline,
+                    'publication_date': data.get('publication_date')
+                })
 
         if len(documents) < 10:
             raise HTTPException(400, f"Not enough articles for topic modeling. Found {len(documents)}, need at least 10.")
 
         # Train the topic model
         print(f"Training topic model on {len(documents)} articles...")
-        pipeline.train_topic_model(documents)
+        pipeline.nlp_processor.train_topic_model(documents)
+
+        # Store article metadata for later retrieval
+        pipeline.nlp_processor.article_metadata = article_metadata
 
         # Get topic info
-        topic_info = pipeline.topic_model.get_topic_info()
+        topic_info = pipeline.nlp_processor.topic_model.get_topic_info()
         topics = []
 
         for _, row in topic_info.iterrows():
             if row['Topic'] != -1:  # Skip outlier topic
-                topic_words = pipeline.topic_model.get_topic(row['Topic'])
+                topic_words = pipeline.nlp_processor.topic_model.get_topic(row['Topic'])
                 topics.append({
                     'topic_id': int(row['Topic']),
                     'count': int(row['Count']),
@@ -1415,24 +1490,47 @@ def train_topic_model():
 
 @app.get("/api/topics")
 def get_topics():
-    """Get discovered topics from trained model"""
+    """Get discovered topics from trained model with representative documents"""
     try:
         _init_pipeline()
 
-        if not PIPELINE_AVAILABLE or not pipeline.topic_model:
+        if not PIPELINE_AVAILABLE or not pipeline.nlp_processor.topic_model:
             raise HTTPException(400, "Topic model not trained yet. Train it first using POST /api/topics/train")
 
-        topic_info = pipeline.topic_model.get_topic_info()
+        topic_info = pipeline.nlp_processor.topic_model.get_topic_info()
         topics = []
+
+        # Get representative documents for each topic
+        topic_assignments = pipeline.nlp_processor.topic_assignments
+        article_metadata = getattr(pipeline.nlp_processor, 'article_metadata', [])
 
         for _, row in topic_info.iterrows():
             if row['Topic'] != -1:  # Skip outlier topic
-                topic_words = pipeline.topic_model.get_topic(row['Topic'])
+                topic_id = int(row['Topic'])
+                topic_words = pipeline.nlp_processor.topic_model.get_topic(topic_id)
+
+                # Get representative documents for this topic (up to 5)
+                representative_docs = []
+                if article_metadata and len(topic_assignments) == len(article_metadata):
+                    topic_doc_indices = [i for i, t in enumerate(topic_assignments) if t == topic_id]
+                    for idx in topic_doc_indices[:5]:  # Get top 5
+                        if idx < len(article_metadata):
+                            representative_docs.append({
+                                'headline': article_metadata[idx]['headline'],
+                                'id': article_metadata[idx]['id']
+                            })
+
+                # Create meaningful topic name from top keywords
+                top_keywords = [word for word, _ in topic_words[:3]]
+                topic_name = ' • '.join([k.title() for k in top_keywords])
+
                 topics.append({
-                    'topic_id': int(row['Topic']),
+                    'topic_id': topic_id,
                     'count': int(row['Count']),
-                    'keywords': [word for word, _ in topic_words[:10]],
-                    'name': row.get('Name', f"Topic {row['Topic']}")
+                    'keywords': [word for word, score in topic_words[:10]],
+                    'keyword_scores': [(word, round(float(score), 3)) for word, score in topic_words[:10]],
+                    'name': topic_name,
+                    'representative_docs': representative_docs
                 })
 
         return {
@@ -1443,6 +1541,113 @@ def get_topics():
     except Exception as e:
         print(f"Get topics error: {str(e)}")
         raise HTTPException(500, f"Failed to get topics: {str(e)}")
+
+@app.get("/api/analytics/keyword-frequency-over-time")
+def get_keyword_frequency_over_time(
+    keyword: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    granularity: str = 'month'
+):
+    """Get keyword mention frequency over time"""
+    try:
+        db = get_firestore_db()
+        data = db.get_keyword_frequency_over_time(keyword, start_date, end_date, granularity)
+        return {"keyword": keyword, "data": data}
+    except Exception as e:
+        print(f"Keyword frequency over time error: {str(e)}")
+        raise HTTPException(500, f"Failed to get keyword frequency: {str(e)}")
+
+@app.get("/api/analytics/entity-mentions-over-time")
+def get_entity_mentions_over_time(
+    entity: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    granularity: str = 'month'
+):
+    """Get entity mention frequency over time with sentiment"""
+    try:
+        db = get_firestore_db()
+        data = db.get_entity_mentions_over_time(entity, start_date, end_date, granularity)
+        return {"entity": entity, "data": data}
+    except Exception as e:
+        print(f"Entity mentions over time error: {str(e)}")
+        raise HTTPException(500, f"Failed to get entity mentions: {str(e)}")
+
+@app.get("/api/analytics/compare-entities")
+def compare_entities(
+    entities: str,  # Comma-separated list
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Compare multiple entities across various metrics"""
+    try:
+        db = get_firestore_db()
+        entity_list = [e.strip() for e in entities.split(',')]
+        if len(entity_list) > 5:
+            raise HTTPException(400, "Maximum 5 entities allowed for comparison")
+        data = db.compare_entities(entity_list, start_date, end_date)
+        return {"entities": entity_list, "comparison": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Entity comparison error: {str(e)}")
+        raise HTTPException(500, f"Failed to compare entities: {str(e)}")
+
+@app.get("/api/analytics/topic-volume-over-time")
+def get_topic_volume_over_time(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    granularity: str = 'month'
+):
+    """Get topic distribution over time"""
+    try:
+        db = get_firestore_db()
+        data = db.get_topic_volume_over_time(start_date, end_date, granularity)
+        return {"data": data}
+    except Exception as e:
+        print(f"Topic volume over time error: {str(e)}")
+        raise HTTPException(500, f"Failed to get topic volume: {str(e)}")
+
+@app.get("/api/analytics/location-analytics")
+def get_location_analytics(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+):
+    """Get geographic analytics"""
+    try:
+        db = get_firestore_db()
+        data = db.get_location_analytics(start_date, end_date)
+        return data
+    except Exception as e:
+        print(f"Location analytics error: {str(e)}")
+        raise HTTPException(500, f"Failed to get location analytics: {str(e)}")
+
+@app.get("/api/analytics/entity-cooccurrence")
+def get_entity_cooccurrence(
+    entity_type: Optional[str] = None,
+    min_count: int = 3,
+    limit: int = 50
+):
+    """Get entity pairs that frequently appear together"""
+    try:
+        db = get_firestore_db()
+        data = db.get_entity_cooccurrence(entity_type, min_count, limit)
+        return {"cooccurrences": data}
+    except Exception as e:
+        print(f"Entity co-occurrence error: {str(e)}")
+        raise HTTPException(500, f"Failed to get entity co-occurrence: {str(e)}")
+
+@app.get("/api/analytics/topic-distribution")
+def get_topic_distribution():
+    """Get topic distribution across all articles"""
+    try:
+        db = get_firestore_db()
+        data = db.get_topic_distribution()
+        return {"topics": data}
+    except Exception as e:
+        print(f"Topic distribution error: {str(e)}")
+        raise HTTPException(500, f"Failed to get topic distribution: {str(e)}")
 
 @app.get("/")
 def root():

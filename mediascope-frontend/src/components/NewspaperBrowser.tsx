@@ -41,6 +41,8 @@ const NewspaperBrowser: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('1990-01-01');
   const [endDate, setEndDate] = useState('1992-12-31');
+  const [editingDate, setEditingDate] = useState(false);
+  const [newDate, setNewDate] = useState('');
 
   const loadNewspapers = async () => {
     setLoading(true);
@@ -101,6 +103,33 @@ const NewspaperBrowser: React.FC = () => {
   const handleBackToList = () => {
     setSelectedPage(null);
     setSummary('');
+  };
+
+  const updateNewspaperDate = async (newspaperId: string, date: string) => {
+    try {
+      const response = await axios.patch(`${API_BASE}/newspapers/${newspaperId}/date`, {
+        new_date: date
+      });
+
+      if (response.data.status === 'success') {
+        alert(`Date updated successfully! ${response.data.articles_updated} articles updated.`);
+        setEditingDate(false);
+        // Reload the page to show updated date
+        loadNewspaperPage(newspaperId);
+        // Reload newspaper list
+        loadNewspapers();
+      }
+    } catch (error: any) {
+      console.error('Error updating date:', error);
+      alert('Failed to update date: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  const startEditingDate = () => {
+    if (selectedPage) {
+      setNewDate(selectedPage.newspaper.publication_date.split('T')[0]);
+      setEditingDate(true);
+    }
   };
 
   return (
@@ -172,13 +201,75 @@ const NewspaperBrowser: React.FC = () => {
           </button>
 
           <div className="page-header">
-            <h2>
-              {new Date(selectedPage.newspaper.publication_date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-              })}
-            </h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+              {!editingDate ? (
+                <>
+                  <h2 style={{ margin: 0 }}>
+                    {new Date(selectedPage.newspaper.publication_date).toLocaleDateString('en-US', {
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </h2>
+                  <button
+                    onClick={startEditingDate}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: '13px',
+                      background: '#667eea',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Edit Date
+                  </button>
+                </>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="date"
+                    value={newDate}
+                    onChange={(e) => setNewDate(e.target.value)}
+                    style={{
+                      padding: '8px',
+                      fontSize: '14px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '4px'
+                    }}
+                  />
+                  <button
+                    onClick={() => updateNewspaperDate(selectedPage.newspaper.id, newDate)}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      background: '#10b981',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => setEditingDate(false)}
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      background: '#6b7280',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
             <div className="page-meta">
               <span>Page {selectedPage.newspaper.page_number}</span>
               <span>{selectedPage.article_count} articles</span>
