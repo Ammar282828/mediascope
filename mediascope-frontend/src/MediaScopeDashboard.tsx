@@ -5,9 +5,12 @@ import ArticleList from './components/ArticleList';
 import SearchResultsSummary from './components/SearchResultsSummary';
 import {
   AnalyticsSummary,
-  SentimentDistribution,
   TopicDistribution,
-  EntityCooccurrenceNetwork
+  TopicTrendsOverTime,
+  EntityCooccurrenceNetwork,
+  TopicSentimentOverTime,
+  EntitySentimentOverTime,
+  KeywordSentimentOverTime
 } from './components/EnhancedAnalytics';
 import {
   KeywordFrequencyOverTime,
@@ -307,33 +310,44 @@ const MediaScopeDashboard: React.FC = () => {
                 Comprehensive analysis of the newspaper archive
               </p>
 
-              {/* Row 1: Sentiment & Topics */}
-              <div className="analytics-grid">
-                <div className="analytics-card">
-                  <SentimentDistribution />
-                </div>
-                <div className="analytics-card">
-                  <TopicDistribution />
-                </div>
+              {/* Row 1: Topics */}
+              <div className="analytics-card full-width">
+                <TopicDistribution />
               </div>
 
-              {/* Row 2: Top Entities */}
+              {/* Row 2: Topic Trends Over Time */}
+              <div className="analytics-card full-width">
+                <TopicTrendsOverTime />
+              </div>
+
+              {/* Row 3: Top Entities */}
               <div className="analytics-card full-width">
                 <TopEntitiesPanel />
               </div>
 
-              {/* Row 3: Entity Co-occurrence */}
+              {/* Row 4: Entity Relationships */}
               <div className="analytics-card full-width">
                 <EntityCooccurrenceNetwork />
               </div>
 
-              {/* Row 4: Temporal Analysis */}
+              {/* Row 5: Keyword Trends */}
               <div className="analytics-card full-width">
                 <KeywordFrequencyOverTime />
               </div>
 
+              {/* Row 6: Topic Sentiment Over Time */}
               <div className="analytics-card full-width">
-                <EntityMentionsOverTime />
+                <TopicSentimentOverTime />
+              </div>
+
+              {/* Row 7: Entity Sentiment Over Time */}
+              <div className="analytics-card full-width">
+                <EntitySentimentOverTime />
+              </div>
+
+              {/* Row 8: Keyword Sentiment Over Time */}
+              <div className="analytics-card full-width">
+                <KeywordSentimentOverTime />
               </div>
             </div>
           </div>

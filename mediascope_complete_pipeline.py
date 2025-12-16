@@ -396,22 +396,31 @@ class NLPProcessor:
     
     def __init__(self, config: Config):
         self.config = config
-        
+
+        # Force CPU mode to avoid device placement issues
+        import os
+        os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
+        os.environ['CUDA_VISIBLE_DEVICES'] = ''
+
+        import torch
+        torch.set_num_threads(4)
+
         # Load spaCy model
         print("Loading spaCy model...")
         self.nlp = spacy.load(config.SPACY_MODEL)
 
-        # Load sentiment model
+        # Load sentiment model with explicit CPU device
         print("Loading sentiment analysis model...")
         self.sentiment_analyzer = pipeline(
             "sentiment-analysis",
             model=config.SENTIMENT_MODEL,
+            device=-1,  # Force CPU (-1 means CPU in transformers)
             top_k=None
         )
 
-        # Load BERTopic
+        # Load BERTopic with explicit CPU device
         print("Loading topic modeling...")
-        self.embedding_model = SentenceTransformer(config.EMBEDDING_MODEL)
+        self.embedding_model = SentenceTransformer(config.EMBEDDING_MODEL, device='cpu')
         self.topic_model = None  # Will be trained on full dataset
 
         print("[OK] NLP models loaded")
@@ -476,7 +485,7 @@ class NLPProcessor:
             embedding_model=self.embedding_model,
             vectorizer_model=vectorizer_model,
             nr_topics="auto",
-            min_topic_size=30,  # Larger minimum for more coherent topics
+            min_topic_size=15,  # More granular topics for better insights
             calculate_probabilities=True,
             verbose=True
         )
@@ -489,7 +498,36 @@ class NLPProcessor:
 
         print(f"[OK] Discovered {len(set(topics))} topics")
         return self.topic_model
-    
+
+    def save_topic_model(self, path: str = "topic_model"):
+        """Save the trained topic model to disk"""
+        if self.topic_model is None:
+            raise ValueError("No topic model to save. Train the model first.")
+
+        import os
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else ".", exist_ok=True)
+
+        # Use pickle serialization to avoid safetensors logger issues
+        self.topic_model.save(path, serialization="pickle", save_ctfidf=True, save_embedding_model=False)
+        print(f"Topic model saved to {path}")
+
+    def load_topic_model(self, path: str = "topic_model"):
+        """Load a trained topic model from disk"""
+        import os
+        if not os.path.exists(path):
+            return False
+
+        self.topic_model = BERTopic.load(path, embedding_model=self.embedding_model)
+
+        # Initialize empty arrays for topic assignments and metadata
+        # These will be populated from the database if needed
+        self.topic_assignments = []
+        self.article_metadata = []
+        self.topic_documents = []
+
+        print(f"Topic model loaded from {path}")
+        return True
+
     def assign_topic(self, text: str) -> Dict:
         """Assign topic to a document"""
         if not self.topic_model:

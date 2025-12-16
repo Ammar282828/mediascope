@@ -386,40 +386,146 @@ export const EntityCooccurrenceNetwork: React.FC = () => {
       </div>
 
       {loading ? (
-        <p>Loading relationships...</p>
+        <p style={{ margin: '2rem 0', fontSize: '14px' }}>Loading relationships...</p>
       ) : cooccurrences.length > 0 ? (
-        <div className="cooccurrence-table-container">
-          <table className="cooccurrence-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Entity 1</th>
-                <th>Type</th>
-                <th></th>
-                <th>Entity 2</th>
-                <th>Type</th>
-                <th>Appears Together</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cooccurrences.map((pair, idx) => (
-                <tr key={idx}>
-                  <td className="rank-cell">{idx + 1}</td>
-                  <td className="entity-cell"><strong>{pair.entity1}</strong></td>
-                  <td className="type-cell"><span className="type-badge">{pair.type1}</span></td>
-                  <td className="arrow-cell">↔</td>
-                  <td className="entity-cell"><strong>{pair.entity2}</strong></td>
-                  <td className="type-cell"><span className="type-badge">{pair.type2}</span></td>
-                  <td className="count-cell">
-                    <span className="count-value">{pair.cooccurrence_count}</span> articles
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {cooccurrences.map((pair, idx) => {
+            const getTypeColor = (type: string) => {
+              switch(type) {
+                case 'PERSON': return '#3b82f6';
+                case 'ORG': return '#f59e0b';
+                case 'GPE': return '#10b981';
+                default: return '#6b7280';
+              }
+            };
+
+            const getTypeIcon = (type: string) => {
+              switch(type) {
+                case 'PERSON': return '👤';
+                case 'ORG': return '🏢';
+                case 'GPE': return '📍';
+                default: return '🏷️';
+              }
+            };
+
+            return (
+              <div
+                key={idx}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '16px',
+                  background: 'white',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '8px',
+                  gap: '16px',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                  e.currentTarget.style.borderColor = '#d1d5db';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = 'none';
+                  e.currentTarget.style.borderColor = '#e5e7eb';
+                }}
+              >
+                {/* Rank */}
+                <div style={{
+                  minWidth: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#f3f4f6',
+                  borderRadius: '50%',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#6b7280'
+                }}>
+                  {idx + 1}
+                </div>
+
+                {/* Entity 1 */}
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '20px' }}>{getTypeIcon(pair.type1)}</span>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>
+                      {pair.entity1}
+                    </div>
+                    <div style={{
+                      fontSize: '11px',
+                      color: getTypeColor(pair.type1),
+                      fontWeight: '500',
+                      marginTop: '2px'
+                    }}>
+                      {pair.type1}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Connection */}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '0 12px'
+                }}>
+                  <div style={{
+                    fontSize: '24px',
+                    color: '#9ca3af',
+                    lineHeight: '1'
+                  }}>
+                    ↔
+                  </div>
+                  <div style={{
+                    background: '#eff6ff',
+                    color: '#3b82f6',
+                    padding: '4px 10px',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    {pair.cooccurrence_count} articles
+                  </div>
+                </div>
+
+                {/* Entity 2 */}
+                <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '20px' }}>{getTypeIcon(pair.type2)}</span>
+                  <div>
+                    <div style={{ fontWeight: '600', fontSize: '14px', color: '#111827' }}>
+                      {pair.entity2}
+                    </div>
+                    <div style={{
+                      fontSize: '11px',
+                      color: getTypeColor(pair.type2),
+                      fontWeight: '500',
+                      marginTop: '2px'
+                    }}>
+                      {pair.type2}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
-        <p>No entity relationships found. Try a different filter or add more articles.</p>
+        <div style={{
+          margin: '2rem 0',
+          padding: '2rem',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          textAlign: 'center',
+          fontSize: '13px'
+        }}>
+          <strong>No entity relationships found.</strong>
+          <br />
+          Try a different filter or add more articles to discover connections.
+        </div>
       )}
     </div>
   );
@@ -605,6 +711,754 @@ export const CoverageHeatmap: React.FC = () => {
           );
         })}
       </div>
+    </div>
+  );
+};
+
+// Topic Trends Over Time - Shows how topic prevalence changes
+export const TopicTrendsOverTime: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [granularity, setGranularity] = useState<'year' | 'month' | 'day'>('month');
+  const [startDate, setStartDate] = useState<string>('');
+  const [endDate, setEndDate] = useState<string>('');
+
+  const loadTrends = async () => {
+    setLoading(true);
+    try {
+      const params: any = { granularity };
+      if (startDate) params.start_date = startDate;
+      if (endDate) params.end_date = endDate;
+
+      const response = await axios.get(`${API_BASE}/analytics/topic-trends-over-time`, { params });
+      const trendsData = response.data.trends || [];
+
+      // Transform data for Recharts
+      // Each period should be an object with period key and topic counts as values
+      const transformedData = trendsData.map((periodData: any) => {
+        const dataPoint: any = { period: periodData.period };
+
+        periodData.topics.forEach((topic: any) => {
+          dataPoint[topic.topic_name] = topic.count;
+        });
+
+        return dataPoint;
+      });
+
+      setData(transformedData);
+    } catch (error) {
+      console.error('Failed to load topic trends:', error);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTrends();
+  }, [granularity, startDate, endDate]);
+
+  // Get all unique topic names for the legend
+  const topicNames = data.length > 0
+    ? Array.from(new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'period'))))
+    : [];
+
+  // Color palette for topics
+  const TOPIC_COLORS = [
+    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+    '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16'
+  ];
+
+  if (loading) return <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading topic trends...</p>;
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '0.75rem' }}>Topic Trends Over Time</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Track how different topics gain or lose prominence over time
+      </p>
+
+      {/* Controls */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: '1.5rem',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        padding: '1rem',
+        background: '#f9fafb',
+        borderRadius: '8px'
+      }}>
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Granularity:
+          </label>
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as 'year' | 'month' | 'day')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          >
+            <option value="year">Yearly</option>
+            <option value="month">Monthly</option>
+            <option value="day">Daily</option>
+          </select>
+        </div>
+
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Start Date:
+          </label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            End Date:
+          </label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          />
+        </div>
+
+        {(startDate || endDate) && (
+          <button
+            onClick={() => {
+              setStartDate('');
+              setEndDate('');
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              background: 'white',
+              fontSize: '13px',
+              cursor: 'pointer',
+              color: '#6b7280'
+            }}
+          >
+            Clear Dates
+          </button>
+        )}
+      </div>
+
+      {/* Chart */}
+      {data.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="period"
+              tick={{ fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={80}
+            />
+            <YAxis
+              label={{ value: 'Article Count', angle: -90, position: 'insideLeft', fontSize: 12 }}
+              tick={{ fontSize: 12 }}
+            />
+            <Tooltip
+              contentStyle={{
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '12px'
+              }}
+            />
+            <Legend
+              wrapperStyle={{ fontSize: '12px' }}
+              iconType="line"
+            />
+            {topicNames.map((topicName, idx) => (
+              <Line
+                key={topicName}
+                type="monotone"
+                dataKey={topicName}
+                stroke={TOPIC_COLORS[idx % TOPIC_COLORS.length]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+                name={topicName}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{
+          margin: '2rem 0',
+          padding: '2rem',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          textAlign: 'center',
+          fontSize: '13px'
+        }}>
+          <strong>No trend data available.</strong>
+          <br />
+          Make sure topics are trained and articles have publication dates.
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Topic Sentiment Over Time - Track sentiment changes for topics
+export const TopicSentimentOverTime: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [topics, setTopics] = useState<any[]>([]);
+  const [selectedTopicId, setSelectedTopicId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [granularity, setGranularity] = useState<'year' | 'month' | 'day'>('month');
+
+  // Load topics
+  useEffect(() => {
+    const fetchTopics = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/topics`);
+        setTopics(response.data.topics || []);
+      } catch (error) {
+        console.error('Failed to load topics:', error);
+      }
+    };
+    fetchTopics();
+  }, []);
+
+  // Load sentiment data
+  const loadSentiment = async () => {
+    setLoading(true);
+    try {
+      const params: any = { granularity };
+      if (selectedTopicId !== null) params.topic_id = selectedTopicId;
+
+      const response = await axios.get(`${API_BASE}/analytics/topic-sentiment-over-time`, { params });
+      const trends = response.data.trends || [];
+
+      // Transform data for chart
+      const chartData = trends.map((period: any) => {
+        const dataPoint: any = { period: period.period };
+
+        period.topics.forEach((topic: any) => {
+          const topicName = topics.find(t => t.topic_id === topic.topic_id)?.keywords?.[0] || `Topic ${topic.topic_id}`;
+          dataPoint[topicName] = topic.avg_sentiment;
+        });
+
+        return dataPoint;
+      });
+
+      setData(chartData);
+    } catch (error) {
+      console.error('Failed to load topic sentiment:', error);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (topics.length > 0) {
+      loadSentiment();
+    }
+  }, [granularity, selectedTopicId, topics]);
+
+  const topicNames = data.length > 0
+    ? Array.from(new Set(data.flatMap(d => Object.keys(d).filter(k => k !== 'period'))))
+    : [];
+
+  const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+
+  if (loading) return <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading sentiment trends...</p>;
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '0.75rem' }}>Topic Sentiment Over Time</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Track how sentiment changes for each topic over time
+      </p>
+
+      {/* Controls */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: '1.5rem',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        padding: '1rem',
+        background: '#f9fafb',
+        borderRadius: '8px'
+      }}>
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Topic:
+          </label>
+          <select
+            value={selectedTopicId ?? ''}
+            onChange={(e) => setSelectedTopicId(e.target.value ? parseInt(e.target.value) : null)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white',
+              minWidth: '200px'
+            }}
+          >
+            <option value="">All Topics</option>
+            {topics.map(topic => (
+              <option key={topic.topic_id} value={topic.topic_id}>
+                Topic {topic.topic_id}: {topic.keywords?.[0] || 'Unknown'}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Granularity:
+          </label>
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as 'year' | 'month' | 'day')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          >
+            <option value="year">Yearly</option>
+            <option value="month">Monthly</option>
+            <option value="day">Daily</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Chart */}
+      {data.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="period"
+              tick={{ fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={80}
+            />
+            <YAxis
+              label={{ value: 'Average Sentiment', angle: -90, position: 'insideLeft', fontSize: 12 }}
+              tick={{ fontSize: 12 }}
+              domain={[-1, 1]}
+            />
+            <Tooltip
+              contentStyle={{
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '12px'
+              }}
+              formatter={(value: any) => [value.toFixed(3), 'Sentiment']}
+            />
+            <Legend wrapperStyle={{ fontSize: '12px' }} />
+            {topicNames.map((topicName, idx) => (
+              <Line
+                key={topicName}
+                type="monotone"
+                dataKey={topicName}
+                stroke={COLORS[idx % COLORS.length]}
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+                name={topicName}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{
+          margin: '2rem 0',
+          padding: '2rem',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          textAlign: 'center',
+          fontSize: '13px'
+        }}>
+          <strong>No sentiment data available.</strong>
+          <br />
+          Make sure topics are trained and articles have sentiment scores.
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Entity Sentiment Over Time - Track sentiment for specific entities
+export const EntitySentimentOverTime: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [entity, setEntity] = useState<string>('Pakistan');
+  const [topEntities, setTopEntities] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [granularity, setGranularity] = useState<'year' | 'month' | 'day'>('month');
+
+  // Load top entities
+  useEffect(() => {
+    const fetchEntities = async () => {
+      try {
+        const response = await axios.get(`${API_BASE}/analytics/top-entities-fixed?limit=20`);
+        const entities = response.data.entities || [];
+        setTopEntities(entities.map((e: any) => e.entity));
+        if (entities.length > 0 && !entity) {
+          setEntity(entities[0].entity);
+        }
+      } catch (error) {
+        console.error('Failed to load entities:', error);
+      }
+    };
+    fetchEntities();
+  }, []);
+
+  // Load sentiment data
+  const loadSentiment = async () => {
+    if (!entity) return;
+
+    setLoading(true);
+    try {
+      const params: any = { entity, granularity };
+      const response = await axios.get(`${API_BASE}/analytics/entity-sentiment-over-time`, { params });
+      const trends = response.data.trends || [];
+
+      setData(trends.map((t: any) => ({
+        period: t.period,
+        sentiment: t.avg_sentiment,
+        count: t.article_count
+      })));
+    } catch (error) {
+      console.error('Failed to load entity sentiment:', error);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (entity) {
+      loadSentiment();
+    }
+  }, [granularity, entity]);
+
+  if (loading) return <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading sentiment trends...</p>;
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '0.75rem' }}>Entity Sentiment Over Time</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Track sentiment changes for specific entities
+      </p>
+
+      {/* Controls */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: '1.5rem',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        padding: '1rem',
+        background: '#f9fafb',
+        borderRadius: '8px'
+      }}>
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Entity:
+          </label>
+          <select
+            value={entity}
+            onChange={(e) => setEntity(e.target.value)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white',
+              minWidth: '200px'
+            }}
+          >
+            {topEntities.map(ent => (
+              <option key={ent} value={ent}>{ent}</option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Granularity:
+          </label>
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as 'year' | 'month' | 'day')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          >
+            <option value="year">Yearly</option>
+            <option value="month">Monthly</option>
+            <option value="day">Daily</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Chart */}
+      {data.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="period"
+              tick={{ fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={80}
+            />
+            <YAxis
+              label={{ value: 'Average Sentiment', angle: -90, position: 'insideLeft', fontSize: 12 }}
+              tick={{ fontSize: 12 }}
+              domain={[-1, 1]}
+            />
+            <Tooltip
+              contentStyle={{
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '12px'
+              }}
+              formatter={(value: any, name: string) => {
+                if (name === 'sentiment') return [value.toFixed(3), 'Sentiment'];
+                return [value, 'Articles'];
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: '12px' }} />
+            <Line
+              type="monotone"
+              dataKey="sentiment"
+              stroke="#3b82f6"
+              strokeWidth={2}
+              dot={{ r: 4 }}
+              activeDot={{ r: 6 }}
+              name={`${entity} Sentiment`}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{
+          margin: '2rem 0',
+          padding: '2rem',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          textAlign: 'center',
+          fontSize: '13px'
+        }}>
+          <strong>No sentiment data available for this entity.</strong>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Keyword Sentiment Over Time - Track sentiment for keywords
+export const KeywordSentimentOverTime: React.FC = () => {
+  const [data, setData] = useState<any[]>([]);
+  const [keyword, setKeyword] = useState<string>('election');
+  const [loading, setLoading] = useState(true);
+  const [granularity, setGranularity] = useState<'year' | 'month' | 'day'>('month');
+
+  // Load sentiment data
+  const loadSentiment = async () => {
+    if (!keyword) return;
+
+    setLoading(true);
+    try {
+      const params: any = { keyword, granularity };
+      const response = await axios.get(`${API_BASE}/analytics/keyword-sentiment-over-time`, { params });
+      const trends = response.data.trends || [];
+
+      setData(trends.map((t: any) => ({
+        period: t.period,
+        sentiment: t.avg_sentiment,
+        count: t.article_count
+      })));
+    } catch (error) {
+      console.error('Failed to load keyword sentiment:', error);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (keyword) {
+      loadSentiment();
+    }
+  }, [granularity, keyword]);
+
+  if (loading) return <p style={{ margin: '1rem 0', fontSize: '14px' }}>Loading sentiment trends...</p>;
+
+  return (
+    <div>
+      <h3 style={{ marginBottom: '0.75rem' }}>Keyword Sentiment Over Time</h3>
+      <p style={{ fontSize: '13px', color: '#6b7280', margin: '8px 0 16px 0' }}>
+        Track sentiment changes for specific keywords
+      </p>
+
+      {/* Controls */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: '1.5rem',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        padding: '1rem',
+        background: '#f9fafb',
+        borderRadius: '8px'
+      }}>
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Keyword:
+          </label>
+          <input
+            type="text"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="Enter keyword..."
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white',
+              minWidth: '200px'
+            }}
+          />
+        </div>
+
+        <div>
+          <label style={{ fontSize: '13px', fontWeight: '600', marginRight: '8px', color: '#374151' }}>
+            Granularity:
+          </label>
+          <select
+            value={granularity}
+            onChange={(e) => setGranularity(e.target.value as 'year' | 'month' | 'day')}
+            style={{
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid #d1d5db',
+              fontSize: '13px',
+              background: 'white'
+            }}
+          >
+            <option value="year">Yearly</option>
+            <option value="month">Monthly</option>
+            <option value="day">Daily</option>
+          </select>
+        </div>
+
+        <button
+          onClick={loadSentiment}
+          style={{
+            padding: '6px 16px',
+            borderRadius: '6px',
+            border: 'none',
+            background: '#3b82f6',
+            color: 'white',
+            fontSize: '13px',
+            fontWeight: '600',
+            cursor: 'pointer'
+          }}
+        >
+          Search
+        </button>
+      </div>
+
+      {/* Chart */}
+      {data.length > 0 ? (
+        <ResponsiveContainer width="100%" height={400}>
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+            <XAxis
+              dataKey="period"
+              tick={{ fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={80}
+            />
+            <YAxis
+              label={{ value: 'Average Sentiment', angle: -90, position: 'insideLeft', fontSize: 12 }}
+              tick={{ fontSize: 12 }}
+              domain={[-1, 1]}
+            />
+            <Tooltip
+              contentStyle={{
+                background: 'white',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '12px'
+              }}
+              formatter={(value: any, name: string) => {
+                if (name === 'sentiment') return [value.toFixed(3), 'Sentiment'];
+                return [value, 'Articles'];
+              }}
+            />
+            <Legend wrapperStyle={{ fontSize: '12px' }} />
+            <Line
+              type="monotone"
+              dataKey="sentiment"
+              stroke="#10b981"
+              strokeWidth={2}
+              dot={{ r: 4 }}
+              activeDot={{ r: 6 }}
+              name={`"${keyword}" Sentiment`}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <div style={{
+          margin: '2rem 0',
+          padding: '2rem',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          textAlign: 'center',
+          fontSize: '13px'
+        }}>
+          <strong>No sentiment data available for this keyword.</strong>
+        </div>
+      )}
     </div>
   );
 };

@@ -649,6 +649,10 @@ class FirestoreDB:
 
                 # Generate all pairs of entities in this article
                 for e1, e2 in combinations(filtered_entities, 2):
+                    # Skip pairs where both entities are the same (after normalization)
+                    if e1['text'] == e2['text']:
+                        continue
+
                     # Order entities alphabetically for consistent keys
                     if e1['text'] < e2['text']:
                         pair = (e1['text'], e1['type'], e2['text'], e2['type'])
